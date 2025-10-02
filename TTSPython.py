@@ -115,11 +115,23 @@ class ReaderApp:
         theme_btn.pack(side="left", padx=(0,6))
         settings_btn.pack(side="left", padx=(0,6))
         
-        # Clipboard monitor checkbox
+        # Clipboard monitor controls
+        clipboard_frame = ttk.Frame(file_frame)
+        clipboard_frame.pack(side="right", padx=(6,0))
+        
         self.clipboard_var = tk.BooleanVar(value=self.clipboard_monitor_enabled)
-        clipboard_check = ttk.Checkbutton(file_frame, text="📎 Auto-speak Clipboard", 
+        clipboard_check = ttk.Checkbutton(clipboard_frame, text="📎 Monitor Clipboard:", 
                                          variable=self.clipboard_var, command=self.toggle_clipboard_monitor)
-        clipboard_check.pack(side="right", padx=(6,0))
+        clipboard_check.pack(side="left")
+        
+        # Clipboard action mode (speak or queue)
+        self.clipboard_action = tk.StringVar(value="speak")
+        clipboard_speak_radio = ttk.Radiobutton(clipboard_frame, text="Speak", 
+                                               variable=self.clipboard_action, value="speak")
+        clipboard_queue_radio = ttk.Radiobutton(clipboard_frame, text="Queue", 
+                                               variable=self.clipboard_action, value="queue")
+        clipboard_speak_radio.pack(side="left", padx=(5,0))
+        clipboard_queue_radio.pack(side="left")
         
         # Speech Queue Panel
         queue_frame = ttk.LabelFrame(root, text="📋 Speech Queue", padding=5)
@@ -276,7 +288,7 @@ class ReaderApp:
             self.status_var.set("Clipboard monitoring disabled")
     
     def monitor_clipboard(self):
-        """Monitor clipboard for changes and auto-speak"""
+        """Monitor clipboard for changes and auto-speak or queue"""
         if not self.clipboard_monitor_enabled:
             return
         
@@ -284,10 +296,23 @@ class ReaderApp:
             current_clipboard = self.root.clipboard_get()
             if current_clipboard != self.last_clipboard and current_clipboard.strip():
                 self.last_clipboard = current_clipboard
-                # Only auto-speak if not currently speaking
-                if not self.speaking and len(current_clipboard.strip()) > 5:
-                    self.status_var.set("Auto-speaking clipboard content...")
-                    threading.Thread(target=self._speak_worker, args=(current_clipboard,), daemon=True).start()
+                
+                # Check if clipboard content is long enough
+                if len(current_clipboard.strip()) > 5:
+                    action = self.clipboard_action.get()
+                    
+                    if action == "speak":
+                        # Auto-speak mode (only if not currently speaking)
+                        if not self.speaking:
+                            self.status_var.set("Auto-speaking clipboard content...")
+                            threading.Thread(target=self._speak_worker, args=(current_clipboard,), daemon=True).start()
+                    
+                    elif action == "queue":
+                        # Queue mode - add to speech queue
+                        preview = current_clipboard[:50] + "..." if len(current_clipboard) > 50 else current_clipboard
+                        self.speech_queue.append({'text': current_clipboard, 'name': f"📋 Clipboard: {preview}"})
+                        self.update_queue_display()
+                        self.status_var.set(f"Clipboard added to queue ({len(self.speech_queue)} items)")
         except:
             pass
         
@@ -383,6 +408,13 @@ class ReaderApp:
     
     def _play_queue_worker(self):
         """Worker thread to play queue items sequentially"""
+        # Initialize COM for this thread
+        try:
+            import pythoncom
+            pythoncom.CoInitialize()
+        except ImportError:
+            pass
+        
         try:
             while self.queue_playing and self.current_queue_index < len(self.speech_queue):
                 if self.stop_requested:
@@ -401,7 +433,15 @@ class ReaderApp:
                 self.root.after(0, lambda: self.speak_selected_btn.state(["disabled"]))
                 
                 # Speak the item
+                engine = None
                 try:
+                    # Initialize COM for this thread
+                    try:
+                        import pythoncom
+                        pythoncom.CoInitialize()
+                    except ImportError:
+                        pass
+                    
                     engine = pyttsx3.init()
                     self.current_engine = engine
                     
@@ -412,22 +452,27 @@ class ReaderApp:
                     
                     if not self.stop_requested:
                         engine.say(item['text'])
-                        # Use startLoop to avoid GIL issues in Python 3.13
-                        try:
-                            engine.startLoop(False)
-                            while engine._inLoop and not self.stop_requested:
-                                engine.iterate()
-                                time.sleep(0.05)
-                            engine.endLoop()
-                        except AttributeError:
-                            # Fallback for engines that don't support startLoop
-                            engine.runAndWait()
+                        engine.runAndWait()
                     
                 except Exception as e:
                     err_msg = str(e)
-                    self.root.after(0, lambda: messagebox.showerror("TTS Error", f"Failed to speak queue item: {err_msg}"))
+                    self.root.after(0, lambda msg=err_msg: messagebox.showerror("TTS Error", f"Failed to speak queue item: {msg}"))
                     break
                 finally:
+                    # Cleanup
+                    if engine:
+                        try:
+                            del engine
+                        except:
+                            pass
+                    
+                    # Uninitialize COM
+                    try:
+                        import pythoncom
+                        pythoncom.CoUninitialize()
+                    except:
+                        pass
+                    
                     self.current_engine = None
                 
                 self.speaking = False
@@ -457,6 +502,13 @@ class ReaderApp:
             self.root.after(0, lambda: messagebox.showerror("Queue Error", f"Queue playback failed: {str(e)}"))
             self.root.after(0, lambda: self.speak_btn.state(["!disabled"]))
             self.root.after(0, lambda: self.speak_selected_btn.state(["!disabled"]))
+        finally:
+            # Uninitialize COM
+            try:
+                import pythoncom
+                pythoncom.CoUninitialize()
+            except:
+                pass
 
     def _on_rate_change(self, value):
         self.rate.set(int(float(value)))
@@ -595,7 +647,15 @@ class ReaderApp:
         self.speak_thread.start()
 
     def _speak_worker(self, text):
+        engine = None
         try:
+            # Initialize COM for this thread (Windows-specific fix for Python 3.13)
+            try:
+                import pythoncom
+                pythoncom.CoInitialize()
+            except ImportError:
+                pass  # Not on Windows or comtypes not available
+            
             # Create a fresh engine for each speech to avoid lifecycle issues
             engine = pyttsx3.init()
             self.current_engine = engine  # Store reference for stop functionality
@@ -611,14 +671,14 @@ class ReaderApp:
                 return
             
             # Set up word highlighting callback
-            words = re.findall(r'\S+|\s+', text)
-            self.current_word_idx = [0]  # Use list to allow modification in nested function
-            
             def on_word(name, location, length):
                 if self.stop_requested:
                     return
                 # Calculate word position in text
-                self.root.after(0, lambda: self.highlight_word(location, length))
+                try:
+                    self.root.after(0, lambda loc=location, ln=length: self.highlight_word(loc, ln))
+                except:
+                    pass
             
             # Connect callback if available (not all engines support this)
             try:
@@ -626,19 +686,9 @@ class ReaderApp:
             except:
                 pass  # Callback not supported, continue without highlighting
             
-            # Use startLoop instead of runAndWait to avoid GIL issues in Python 3.13
+            # Simple say and wait
             engine.say(text)
-            try:
-                # startLoop(False) processes events without blocking forever
-                engine.startLoop(False)
-                # Manually iterate until speech is done
-                while engine._inLoop and not self.stop_requested:
-                    engine.iterate()
-                    time.sleep(0.05)
-                engine.endLoop()
-            except AttributeError:
-                # Fallback for engines that don't support startLoop
-                engine.runAndWait()
+            engine.runAndWait()
             
             # Clear highlighting
             self.root.after(0, lambda: self.txt.tag_remove(self.highlight_tag, "1.0", "end"))
@@ -646,9 +696,23 @@ class ReaderApp:
         except Exception as e:
             # Use after() to safely show error message from worker thread
             error_msg = str(e)
-            self.root.after(0, lambda: messagebox.showerror("TTS Error", f"Failed to speak text: {error_msg}"))
+            self.root.after(0, lambda msg=error_msg: messagebox.showerror("TTS Error", f"Failed to speak text: {msg}"))
         finally:
-            self.current_engine = None  # Clear reference
+            # Cleanup
+            if engine:
+                try:
+                    del engine
+                except:
+                    pass
+            
+            # Uninitialize COM
+            try:
+                import pythoncom
+                pythoncom.CoUninitialize()
+            except:
+                pass
+            
+            self.current_engine = None
             self.speaking = False
             self.root.after(0, lambda: self.speak_btn.state(["!disabled"]))
             self.root.after(0, lambda: self.speak_selected_btn.state(["!disabled"]))
