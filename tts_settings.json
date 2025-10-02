@@ -1,0 +1,16 @@
+{
+  "dark_mode": true,
+  "clipboard_monitor": true,
+  "hotkeys": {
+    "speak_all": "<Control-Return>",
+    "speak_selected": "<Control-Shift-Return>",
+    "stop": "<Escape>",
+    "open": "<Control-o>",
+    "save": "<Control-s>",
+    "save_as": "<Control-Shift-S>",
+    "paste": "<Control-v>",
+    "clear": "<Control-l>",
+    "find": "<Control-f>",
+    "export": "<Control-e>"
+  }
+}
