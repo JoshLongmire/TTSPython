@@ -1,5 +1,5 @@
 {
-  "dark_mode": true,
+  "dark_mode": false,
   "clipboard_monitor": true,
   "hotkeys": {
     "speak_all": "<Control-Return>",

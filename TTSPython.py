@@ -16,7 +16,9 @@ class ReaderApp:
         self.current_engine = None
         self.stop_requested = False
         self.current_file = None
-        self.settings_file = "tts_settings.json"
+        # Store settings in the script directory, not AppData
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        self.settings_file = os.path.join(script_dir, "tts_settings.json")
         self.dark_mode = False
         self.clipboard_monitor_enabled = False
         self.last_clipboard = ""
@@ -84,13 +86,17 @@ class ReaderApp:
         # Voice selector
         ttk.Label(controls, text="Voice").grid(row=0, column=9, padx=(8,4))
         self.voice_map = { (v.name or f"Voice {i}"): v.id for i, v in enumerate(self.voices) }
-        self.voice_combo = ttk.Combobox(controls, values=list(self.voice_map.keys()), width=22, state="readonly")
+        self.voice_combo = ttk.Combobox(controls, values=list(self.voice_map.keys()), width=18, state="readonly")
         # Pick a default female/neutral if available
         default_name = next((n for n in self.voice_map if "female" in n.lower() or "zira" in n.lower()), list(self.voice_map.keys())[0])
         self.voice_combo.set(default_name)
         self.selected_voice = self.voice_map[default_name]  # Store selected voice
         self.voice_combo.bind("<<ComboboxSelected>>", self.on_voice_change)
-        self.voice_combo.grid(row=0, column=10, padx=(0,0))
+        self.voice_combo.grid(row=0, column=10, padx=(0,4))
+        
+        # Refresh voices button
+        refresh_voices_btn = ttk.Button(controls, text="🔄", command=self.refresh_voices, width=3)
+        refresh_voices_btn.grid(row=0, column=11, padx=(0,0))
 
         controls.columnconfigure(6, weight=1)
         controls.columnconfigure(8, weight=1)
@@ -408,12 +414,21 @@ class ReaderApp:
     
     def _play_queue_worker(self):
         """Worker thread to play queue items sequentially"""
+        com_initialized = False
+        
         # Initialize COM for this thread
         try:
             import pythoncom
             pythoncom.CoInitialize()
-        except ImportError:
-            pass
+            com_initialized = True
+        except (ImportError, Exception):
+            try:
+                import win32com.client
+                import pythoncom
+                pythoncom.CoInitializeEx(0)
+                com_initialized = True
+            except:
+                pass
         
         try:
             while self.queue_playing and self.current_queue_index < len(self.speech_queue):
@@ -435,13 +450,6 @@ class ReaderApp:
                 # Speak the item
                 engine = None
                 try:
-                    # Initialize COM for this thread
-                    try:
-                        import pythoncom
-                        pythoncom.CoInitialize()
-                    except ImportError:
-                        pass
-                    
                     engine = pyttsx3.init()
                     self.current_engine = engine
                     
@@ -459,19 +467,12 @@ class ReaderApp:
                     self.root.after(0, lambda msg=err_msg: messagebox.showerror("TTS Error", f"Failed to speak queue item: {msg}"))
                     break
                 finally:
-                    # Cleanup
+                    # Cleanup engine
                     if engine:
                         try:
                             del engine
                         except:
                             pass
-                    
-                    # Uninitialize COM
-                    try:
-                        import pythoncom
-                        pythoncom.CoUninitialize()
-                    except:
-                        pass
                     
                     self.current_engine = None
                 
@@ -503,12 +504,13 @@ class ReaderApp:
             self.root.after(0, lambda: self.speak_btn.state(["!disabled"]))
             self.root.after(0, lambda: self.speak_selected_btn.state(["!disabled"]))
         finally:
-            # Uninitialize COM
-            try:
-                import pythoncom
-                pythoncom.CoUninitialize()
-            except:
-                pass
+            # Uninitialize COM if it was initialized
+            if com_initialized:
+                try:
+                    import pythoncom
+                    pythoncom.CoUninitialize()
+                except:
+                    pass
 
     def _on_rate_change(self, value):
         self.rate.set(int(float(value)))
@@ -520,6 +522,50 @@ class ReaderApp:
         vid = self.voice_map.get(self.voice_combo.get())
         if vid:
             self.selected_voice = vid
+    
+    def refresh_voices(self):
+        """Refresh the voice list to detect newly installed voices"""
+        try:
+            # Get current selection
+            current_voice_name = self.voice_combo.get()
+            
+            # Re-initialize engine to get updated voice list
+            temp_engine = pyttsx3.init()
+            self.voices = temp_engine.getProperty("voices")
+            temp_engine.stop()
+            
+            # Rebuild voice map
+            self.voice_map = { (v.name or f"Voice {i}"): v.id for i, v in enumerate(self.voices) }
+            
+            # Update combobox
+            self.voice_combo['values'] = list(self.voice_map.keys())
+            
+            # Try to restore previous selection, otherwise pick first voice
+            if current_voice_name in self.voice_map:
+                self.voice_combo.set(current_voice_name)
+                self.selected_voice = self.voice_map[current_voice_name]
+            else:
+                # Pick first voice if previous selection no longer exists
+                if self.voice_map:
+                    first_voice = list(self.voice_map.keys())[0]
+                    self.voice_combo.set(first_voice)
+                    self.selected_voice = self.voice_map[first_voice]
+            
+            # Update status
+            self.status_var.set(f"Voices refreshed! Found {len(self.voices)} voice(s)")
+            
+            # Show info if new voices were found
+            messagebox.showinfo("Voices Refreshed", 
+                              f"Found {len(self.voices)} voice(s) installed on your system.\n\n"
+                              f"To add more voices:\n"
+                              f"1. Open Windows Settings\n"
+                              f"2. Go to Time & Language → Speech\n"
+                              f"3. Click 'Add voices'\n"
+                              f"4. Click 🔄 to refresh again!")
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to refresh voices: {str(e)}")
+            self.status_var.set("Failed to refresh voices")
 
     def on_paste(self):
         try:
@@ -647,14 +693,26 @@ class ReaderApp:
         self.speak_thread.start()
 
     def _speak_worker(self, text):
+        """Worker thread for speaking text - with Python 3.13 fix"""
         engine = None
+        com_initialized = False
+        
         try:
-            # Initialize COM for this thread (Windows-specific fix for Python 3.13)
+            # Try to initialize COM for this thread (Windows-specific fix for Python 3.13)
             try:
                 import pythoncom
                 pythoncom.CoInitialize()
-            except ImportError:
-                pass  # Not on Windows or comtypes not available
+                com_initialized = True
+            except (ImportError, Exception):
+                # pywin32 not installed or COM init failed
+                # Try alternative: use CoInitializeEx with COINIT_MULTITHREADED
+                try:
+                    import win32com.client
+                    import pythoncom
+                    pythoncom.CoInitializeEx(0)  # COINIT_MULTITHREADED
+                    com_initialized = True
+                except:
+                    pass  # Will try without COM initialization
             
             # Create a fresh engine for each speech to avoid lifecycle issues
             engine = pyttsx3.init()
@@ -698,19 +756,20 @@ class ReaderApp:
             error_msg = str(e)
             self.root.after(0, lambda msg=error_msg: messagebox.showerror("TTS Error", f"Failed to speak text: {msg}"))
         finally:
-            # Cleanup
+            # Cleanup engine
             if engine:
                 try:
                     del engine
                 except:
                     pass
             
-            # Uninitialize COM
-            try:
-                import pythoncom
-                pythoncom.CoUninitialize()
-            except:
-                pass
+            # Uninitialize COM if it was initialized
+            if com_initialized:
+                try:
+                    import pythoncom
+                    pythoncom.CoUninitialize()
+                except:
+                    pass
             
             self.current_engine = None
             self.speaking = False
