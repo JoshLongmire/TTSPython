@@ -1,49 +1,70 @@
-# API Documentation - Read Aloud TTS Application
+# API Documentation - Read Aloud Enhanced TTS Application
 
-This document provides technical documentation for developers who want to understand, modify, or extend the Read Aloud application.
+**Version 2.2** | Complete technical reference for developers
+
+This document provides comprehensive technical documentation for developers who want to understand, modify, or extend the Read Aloud Enhanced application.
 
 ## Table of Contents
 
 - [Architecture Overview](#architecture-overview)
 - [Class Reference](#class-reference)
 - [Method Reference](#method-reference)
+- [New Features (v2.0-2.2)](#new-features)
 - [Threading Model](#threading-model)
 - [TTS Engine Lifecycle](#tts-engine-lifecycle)
+- [Settings System](#settings-system)
+- [Dialog Classes](#dialog-classes)
 - [Extension Guide](#extension-guide)
 - [Best Practices](#best-practices)
+- [Python 3.13 Compatibility](#python-313-compatibility)
 
 ## Architecture Overview
 
-### Component Diagram
+### Component Diagram (v2.2)
 
 ```
-┌─────────────────────────────────────────────┐
-│           ReaderApp (Main Class)            │
-├─────────────────────────────────────────────┤
-│  ┌─────────────┐  ┌──────────────────────┐ │
-│  │ GUI Layer   │  │  TTS Layer           │ │
-│  │ (tkinter)   │◄─┤  (pyttsx3)           │ │
-│  │             │  │                      │ │
-│  │ - Text      │  │ - Engine Management  │ │
-│  │ - Buttons   │  │ - Voice Settings     │ │
-│  │ - Controls  │  │ - Speech Worker      │ │
-│  └─────────────┘  └──────────────────────┘ │
-│  ┌─────────────┐  ┌──────────────────────┐ │
-│  │ File I/O    │  │  Threading           │ │
-│  │             │  │                      │ │
-│  │ - Open      │  │ - Speech Thread      │ │
-│  │ - Save      │  │ - Thread Safety      │ │
-│  │ - Save As   │  │ - UI Updates         │ │
-│  └─────────────┘  └──────────────────────┘ │
-└─────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────┐
+│                 ReaderApp (Main Class - 1000+ lines)             │
+├──────────────────────────────────────────────────────────────────┤
+│  ┌────────────────┐  ┌──────────────────────┐ ┌───────────────┐│
+│  │ GUI Layer      │  │  TTS Layer           │ │ Settings      ││
+│  │ (tkinter+ttk)  │◄─┤  (pyttsx3+pywin32)   │ │ (JSON)        ││
+│  │                │  │                      │ │               ││
+│  │ - Text Editor  │  │ - Engine Management  │ │ - Theme       ││
+│  │ - Buttons      │  │ - Voice Settings     │ │ - Hotkeys     ││
+│  │ - Controls     │  │ - Speech Worker      │ │ - Clipboard   ││
+│  │ - Queue Panel  │  │ - Word Highlighting  │ │ - Persistence ││
+│  │ - Theme Engine │  │ - COM Threading      │ │               ││
+│  └────────────────┘  └──────────────────────┘ └───────────────┘│
+│  ┌────────────────┐  ┌──────────────────────┐ ┌───────────────┐│
+│  │ File I/O       │  │  Threading           │ │ Queue System  ││
+│  │                │  │                      │ │               ││
+│  │ - Open         │  │ - Speech Thread      │ │ - Multi-item  ││
+│  │ - Save/SaveAs  │  │ - Queue Thread       │ │ - Visual FB   ││
+│  │ - Export Audio │  │ - Thread Safety      │ │ - Sequential  ││
+│  │ - UTF-8        │  │ - UI Updates         │ │               ││
+│  └────────────────┘  └──────────────────────┘ └───────────────┘│
+│  ┌────────────────┐  ┌──────────────────────┐ ┌───────────────┐│
+│  │ SearchDialog   │  │  SettingsDialog      │ │ Clipboard     ││
+│  │                │  │                      │ │ Monitor       ││
+│  │ - Find Next    │  │ - Hotkey Capture     │ │               ││
+│  │ - Replace      │  │ - Visual Input       │ │ - 1s Polling  ││
+│  │ - Replace All  │  │ - Save/Reset         │ │ - Speak/Queue ││
+│  │ - Regex        │  │                      │ │ - Background  ││
+│  └────────────────┘  └──────────────────────┘ └───────────────┘│
+└──────────────────────────────────────────────────────────────────┘
 ```
 
 ### Key Design Patterns
 
 1. **Fresh Engine Pattern**: Creates new pyttsx3 engine for each speech operation
-2. **Worker Thread Pattern**: Non-blocking TTS using daemon threads
+2. **Worker Thread Pattern**: Non-blocking TTS using daemon threads with COM initialization
 3. **Thread-Safe UI Updates**: Uses `root.after()` for UI updates from worker threads
-4. **State Management**: Tracks speaking state, current file, and engine references
+4. **State Management**: Tracks speaking, queue, clipboard, theme, and settings state
+5. **Settings Persistence**: JSON-based configuration storage
+6. **Event-Driven Architecture**: Callbacks for word tracking, hotkeys, and clipboard
+7. **Queue Pattern**: Sequential processing of multiple text/file items
+8. **Dialog Pattern**: Separate classes for Find/Replace and Settings
 
 ## Class Reference
 
