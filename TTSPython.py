@@ -15,6 +15,8 @@ class ReaderApp:
         self.speak_thread = None
         self.current_engine = None
         self.stop_requested = False
+        self.global_stop_requested = False  # Global stop flag for all TTS operations
+        self.all_engines = []  # Track all active TTS engines
         self.current_file = None
         # Store settings in the script directory, not AppData
         script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -24,6 +26,8 @@ class ReaderApp:
         self.last_clipboard = ""
         self.highlight_tag = "highlight"
         self.current_word_indices = []
+        self.clipboard_auto_queue = False  # Auto-queue clipboard items when speaking
+        self.clipboard_action_mode = 'speak'  # Default clipboard action mode (will be overridden by load_settings)
         
         # Speech Queue System
         self.speech_queue = []
@@ -34,11 +38,21 @@ class ReaderApp:
         self.load_settings()
         
         # Initialize engine just to get default settings and voices
-        temp_engine = pyttsx3.init()
-        self.default_rate = temp_engine.getProperty("rate")
-        self.default_volume = temp_engine.getProperty("volume")
-        self.voices = temp_engine.getProperty("voices")
-        temp_engine.stop()  # Clean up temp engine
+        try:
+            temp_engine = pyttsx3.init()
+            self.default_rate = temp_engine.getProperty("rate")
+            self.default_volume = temp_engine.getProperty("volume")
+            self.voices = temp_engine.getProperty("voices")
+            temp_engine.stop()  # Clean up temp engine
+        except Exception as e:
+            # Fallback if engine initialization fails
+            messagebox.showerror("TTS Engine Error", 
+                               f"Failed to initialize TTS engine: {str(e)}\n\n"
+                               f"The app may not work correctly.\n"
+                               f"Please ensure pyttsx3 is installed properly.")
+            self.default_rate = 150
+            self.default_volume = 1.0
+            self.voices = []
 
         # --- UI ---
         self.txt = tk.Text(root, wrap="word", height=16, undo=True, font=('Arial', 11))
@@ -88,9 +102,13 @@ class ReaderApp:
         self.voice_map = { (v.name or f"Voice {i}"): v.id for i, v in enumerate(self.voices) }
         self.voice_combo = ttk.Combobox(controls, values=list(self.voice_map.keys()), width=18, state="readonly")
         # Pick a default female/neutral if available
-        default_name = next((n for n in self.voice_map if "female" in n.lower() or "zira" in n.lower()), list(self.voice_map.keys())[0])
-        self.voice_combo.set(default_name)
-        self.selected_voice = self.voice_map[default_name]  # Store selected voice
+        if self.voice_map:
+            default_name = next((n for n in self.voice_map if "female" in n.lower() or "zira" in n.lower()), list(self.voice_map.keys())[0])
+            self.voice_combo.set(default_name)
+            self.selected_voice = self.voice_map[default_name]  # Store selected voice
+        else:
+            self.voice_combo.set("No voices available")
+            self.selected_voice = None
         self.voice_combo.bind("<<ComboboxSelected>>", self.on_voice_change)
         self.voice_combo.grid(row=0, column=10, padx=(0,4))
         
@@ -130,14 +148,20 @@ class ReaderApp:
                                          variable=self.clipboard_var, command=self.toggle_clipboard_monitor)
         clipboard_check.pack(side="left")
         
-        # Clipboard action mode (speak or queue)
-        self.clipboard_action = tk.StringVar(value="speak")
+        # Clipboard action mode (speak or queue) - use loaded setting
+        self.clipboard_action = tk.StringVar(value=self.clipboard_action_mode)
         clipboard_speak_radio = ttk.Radiobutton(clipboard_frame, text="Speak", 
                                                variable=self.clipboard_action, value="speak")
         clipboard_queue_radio = ttk.Radiobutton(clipboard_frame, text="Queue", 
                                                variable=self.clipboard_action, value="queue")
         clipboard_speak_radio.pack(side="left", padx=(5,0))
         clipboard_queue_radio.pack(side="left")
+        
+        # Auto-queue option for speak mode
+        self.auto_queue_var = tk.BooleanVar(value=self.clipboard_auto_queue)
+        auto_queue_check = ttk.Checkbutton(clipboard_frame, text="Auto-Queue", 
+                                          variable=self.auto_queue_var, command=self.toggle_auto_queue)
+        auto_queue_check.pack(side="left", padx=(10,0))
         
         # Speech Queue Panel
         queue_frame = ttk.LabelFrame(root, text="📋 Speech Queue", padding=5)
@@ -195,11 +219,15 @@ class ReaderApp:
                     settings = json.load(f)
                     self.dark_mode = settings.get('dark_mode', False)
                     self.clipboard_monitor_enabled = settings.get('clipboard_monitor', False)
+                    self.clipboard_auto_queue = settings.get('clipboard_auto_queue', False)
+                    self.clipboard_action_mode = settings.get('clipboard_action', 'speak')  # Load clipboard action mode
                     self.hotkeys = settings.get('hotkeys', self.get_default_hotkeys())
             else:
+                self.clipboard_action_mode = 'speak'  # Default mode
                 self.hotkeys = self.get_default_hotkeys()
         except Exception as e:
             print(f"Failed to load settings: {e}")
+            self.clipboard_action_mode = 'speak'  # Default on error
             self.hotkeys = self.get_default_hotkeys()
     
     def save_settings(self):
@@ -208,6 +236,8 @@ class ReaderApp:
             settings = {
                 'dark_mode': self.dark_mode,
                 'clipboard_monitor': self.clipboard_monitor_enabled,
+                'clipboard_auto_queue': self.clipboard_auto_queue,
+                'clipboard_action': self.clipboard_action.get() if hasattr(self, 'clipboard_action') else 'speak',
                 'hotkeys': self.hotkeys
             }
             with open(self.settings_file, 'w') as f:
@@ -293,6 +323,15 @@ class ReaderApp:
         else:
             self.status_var.set("Clipboard monitoring disabled")
     
+    def toggle_auto_queue(self):
+        """Toggle auto-queue for clipboard speak mode"""
+        self.clipboard_auto_queue = self.auto_queue_var.get()
+        self.save_settings()
+        if self.clipboard_auto_queue:
+            self.status_var.set("Auto-queue enabled - clipboard items will queue when speaking")
+        else:
+            self.status_var.set("Auto-queue disabled - clipboard items only speak when idle")
+    
     def monitor_clipboard(self):
         """Monitor clipboard for changes and auto-speak or queue"""
         if not self.clipboard_monitor_enabled:
@@ -308,10 +347,24 @@ class ReaderApp:
                     action = self.clipboard_action.get()
                     
                     if action == "speak":
-                        # Auto-speak mode (only if not currently speaking)
-                        if not self.speaking:
+                        # Auto-speak mode with auto-queue option
+                        if not self.speaking and not self.queue_playing and not self.global_stop_requested:
+                            # Not currently speaking - speak immediately
                             self.status_var.set("Auto-speaking clipboard content...")
                             threading.Thread(target=self._speak_worker, args=(current_clipboard,), daemon=True).start()
+                        elif self.clipboard_auto_queue and not self.global_stop_requested:
+                            # Currently speaking but auto-queue is enabled - add to queue
+                            preview = current_clipboard[:50] + "..." if len(current_clipboard) > 50 else current_clipboard
+                            self.speech_queue.append({'text': current_clipboard, 'name': f"📋 Auto-Queued: {preview}"})
+                            self.update_queue_display()
+                            self.status_var.set(f"Auto-queued clipboard content ({len(self.speech_queue)} items)")
+                            
+                            # Don't start queue automatically - let the current speech finish first
+                            # The queue will be played after the current speech completes
+                        else:
+                            # Currently speaking and auto-queue is disabled - ignore clipboard change
+                            # This prevents the "run loop already started" error
+                            self.status_var.set("Clipboard ignored - already speaking (enable Auto-Queue to queue content)")
                     
                     elif action == "queue":
                         # Queue mode - add to speech queue
@@ -405,6 +458,7 @@ class ReaderApp:
         
         self.queue_playing = True
         self.stop_requested = False  # Reset stop flag
+        self.global_stop_requested = False  # Reset global stop flag
         self.current_queue_index = 0
         self.status_var.set(f"Playing queue item 1 of {len(self.speech_queue)}")
         self.update_queue_display()
@@ -419,20 +473,22 @@ class ReaderApp:
         # Initialize COM for this thread
         try:
             import pythoncom
+            # Try CoInitialize first
             pythoncom.CoInitialize()
             com_initialized = True
-        except (ImportError, Exception):
+        except Exception:
+            # If CoInitialize fails, try CoInitializeEx
             try:
-                import win32com.client
                 import pythoncom
-                pythoncom.CoInitializeEx(0)
+                pythoncom.CoInitializeEx(pythoncom.COINIT_MULTITHREADED)
                 com_initialized = True
-            except:
+            except Exception:
+                # If both fail, try without COM initialization
                 pass
         
         try:
             while self.queue_playing and self.current_queue_index < len(self.speech_queue):
-                if self.stop_requested:
+                if self.stop_requested or self.global_stop_requested:
                     break
                 
                 item = self.speech_queue[self.current_queue_index]
@@ -452,13 +508,14 @@ class ReaderApp:
                 try:
                     engine = pyttsx3.init()
                     self.current_engine = engine
+                    self.all_engines.append(engine)  # Track all engines for global stop
                     
                     engine.setProperty("rate", self.rate.get())
                     engine.setProperty("volume", self.vol.get())
                     if self.selected_voice:
                         engine.setProperty("voice", self.selected_voice)
                     
-                    if not self.stop_requested:
+                    if not self.stop_requested and not self.global_stop_requested:
                         engine.say(item['text'])
                         engine.runAndWait()
                     
@@ -470,6 +527,9 @@ class ReaderApp:
                     # Cleanup engine
                     if engine:
                         try:
+                            # Remove from tracking list
+                            if engine in self.all_engines:
+                                self.all_engines.remove(engine)
                             del engine
                         except:
                             pass
@@ -480,14 +540,14 @@ class ReaderApp:
                 self.current_queue_index += 1
                 
                 # Small pause between items
-                if self.current_queue_index < len(self.speech_queue) and not self.stop_requested:
+                if self.current_queue_index < len(self.speech_queue) and not self.stop_requested and not self.global_stop_requested:
                     threading.Event().wait(0.5)
             
             # Queue finished
             self.queue_playing = False
             self.current_queue_index = -1
             
-            if self.stop_requested:
+            if self.stop_requested or self.global_stop_requested:
                 self.root.after(0, lambda: self.status_var.set("Queue playback stopped"))
             else:
                 self.root.after(0, lambda: self.status_var.set("Queue playback completed"))
@@ -496,6 +556,11 @@ class ReaderApp:
             self.root.after(0, lambda: self.speak_selected_btn.state(["!disabled"]))
             self.root.after(0, lambda: self.update_queue_display())
             self.root.after(0, lambda: self.txt.tag_remove(self.highlight_tag, "1.0", "end"))
+            
+            # If there are more queued items and auto-queue is enabled, continue playing
+            # Only continue if there are items beyond what we just played
+            if self.current_queue_index < len(self.speech_queue) and self.clipboard_auto_queue and not self.stop_requested and not self.global_stop_requested:
+                self.root.after(100, lambda: self._start_auto_queue())
             
         except Exception as e:
             self.queue_playing = False
@@ -669,6 +734,7 @@ class ReaderApp:
                 return
             self.speaking = True
             self.stop_requested = False
+            self.global_stop_requested = False  # Reset global stop flag
             self.speak_btn.state(["disabled"])
             self.speak_selected_btn.state(["disabled"])
             self.status_var.set("Speaking selected text...")
@@ -686,6 +752,7 @@ class ReaderApp:
             return
         self.speaking = True
         self.stop_requested = False
+        self.global_stop_requested = False  # Reset global stop flag
         self.speak_btn.state(["disabled"])
         self.speak_selected_btn.state(["disabled"])
         self.status_var.set("Speaking all text...")
@@ -701,22 +768,23 @@ class ReaderApp:
             # Try to initialize COM for this thread (Windows-specific fix for Python 3.13)
             try:
                 import pythoncom
+                # Try CoInitialize first
                 pythoncom.CoInitialize()
                 com_initialized = True
-            except (ImportError, Exception):
-                # pywin32 not installed or COM init failed
-                # Try alternative: use CoInitializeEx with COINIT_MULTITHREADED
+            except Exception:
+                # If CoInitialize fails, try CoInitializeEx
                 try:
-                    import win32com.client
                     import pythoncom
-                    pythoncom.CoInitializeEx(0)  # COINIT_MULTITHREADED
+                    pythoncom.CoInitializeEx(pythoncom.COINIT_MULTITHREADED)
                     com_initialized = True
-                except:
-                    pass  # Will try without COM initialization
+                except Exception:
+                    # If both fail, try without COM initialization
+                    pass
             
             # Create a fresh engine for each speech to avoid lifecycle issues
             engine = pyttsx3.init()
             self.current_engine = engine  # Store reference for stop functionality
+            self.all_engines.append(engine)  # Track all engines for global stop
             
             # Apply current settings to the new engine
             engine.setProperty("rate", self.rate.get())
@@ -725,12 +793,12 @@ class ReaderApp:
                 engine.setProperty("voice", self.selected_voice)
             
             # Check if stop was requested before starting
-            if self.stop_requested:
+            if self.stop_requested or self.global_stop_requested:
                 return
             
             # Set up word highlighting callback
             def on_word(name, location, length):
-                if self.stop_requested:
+                if self.stop_requested or self.global_stop_requested:
                     return
                 # Calculate word position in text
                 try:
@@ -759,6 +827,9 @@ class ReaderApp:
             # Cleanup engine
             if engine:
                 try:
+                    # Remove from tracking list
+                    if engine in self.all_engines:
+                        self.all_engines.remove(engine)
                     del engine
                 except:
                     pass
@@ -775,7 +846,12 @@ class ReaderApp:
             self.speaking = False
             self.root.after(0, lambda: self.speak_btn.state(["!disabled"]))
             self.root.after(0, lambda: self.speak_selected_btn.state(["!disabled"]))
-            self.root.after(0, lambda: self.status_var.set("Ready"))
+            
+            # If there are queued items and auto-queue is enabled, start playing the queue
+            if self.speech_queue and self.clipboard_auto_queue and not self.queue_playing:
+                self.root.after(0, lambda: self._start_auto_queue())
+            else:
+                self.root.after(0, lambda: self.status_var.set("Ready"))
     
     def highlight_word(self, location, length):
         """Highlight the current word being spoken"""
@@ -796,31 +872,59 @@ class ReaderApp:
             pass  # Ignore errors in highlighting
 
     def on_stop(self):
-        # Stop regular speech
-        if self.speaking and self.current_engine:
-            self.stop_requested = True
+        # Set global stop flag to stop all TTS operations
+        self.global_stop_requested = True
+        self.stop_requested = True
+        
+        # Stop all active engines
+        engines_to_stop = self.all_engines.copy()  # Copy to avoid modification during iteration
+        for engine in engines_to_stop:
             try:
-                self.current_engine.stop()
+                engine.stop()
             except Exception:
                 pass  # Ignore errors when stopping engine
+        
+        # Clear all engine references
+        self.all_engines.clear()
+        self.current_engine = None
+        
+        # Stop regular speech
+        if self.speaking:
             self.speaking = False
             self.speak_btn.state(["!disabled"])
             self.speak_selected_btn.state(["!disabled"])
             self.txt.tag_remove(self.highlight_tag, "1.0", "end")  # Clear highlighting
-            self.status_var.set("Speech stopped")
         
         # Stop queue playback
         if self.queue_playing:
-            self.stop_requested = True
             self.queue_playing = False
-            if self.current_engine:
-                try:
-                    self.current_engine.stop()
-                except Exception:
-                    pass
             self.current_queue_index = -1
             self.update_queue_display()
-            self.status_var.set("Queue playback stopped")
+        
+        # Reset stop flags after a short delay to allow for new operations
+        self.root.after(100, lambda: self._reset_stop_flags())
+        
+        self.status_var.set("All speech stopped")
+    
+    def _reset_stop_flags(self):
+        """Reset stop flags to allow new TTS operations"""
+        self.global_stop_requested = False
+        self.stop_requested = False
+    
+    def _start_auto_queue(self):
+        """Start playing the queue automatically after speech finishes"""
+        if not self.speech_queue or self.queue_playing or self.speaking:
+            return
+        
+        self.queue_playing = True
+        self.stop_requested = False
+        self.global_stop_requested = False
+        # Don't reset current_queue_index - continue from where we left off
+        if self.current_queue_index < 0:
+            self.current_queue_index = 0
+        self.status_var.set(f"Auto-playing queue ({self.current_queue_index + 1} of {len(self.speech_queue)} items)")
+        self.update_queue_display()
+        threading.Thread(target=self._play_queue_worker, daemon=True).start()
 
     def on_close(self):
         self.save_settings()

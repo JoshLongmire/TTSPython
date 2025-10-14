@@ -1,6 +1,8 @@
 {
   "dark_mode": false,
   "clipboard_monitor": true,
+  "clipboard_auto_queue": false,
+  "clipboard_action": "queue",
   "hotkeys": {
     "speak_all": "<Control-Return>",
     "speak_selected": "<Control-Shift-Return>",
