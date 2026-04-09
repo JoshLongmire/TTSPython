@@ -1,4 +1,23 @@
-# Changelog - TTS Application
+# Changelog - TTSPython
+
+## Version 3.0 - April 9, 2026
+- Added Pure Tech as a collaborator for their help in 3.0
+- Huge UI Changes
+	- Imported Pure Tech's theme system
+	- Tabs added for Theme & Audio in the settings window
+	- Replaced 8 second recording button with start and stop buttons
+	- Settings dialog now stays open after saving
+	- Simplified button labeling and alignment for better Windows rendering consistency.
+	- App window title is now `TTSPython`
+- Revised documents and put them into a `docs` folder
+	- Added MIT License to repo
+- Added a Speech to Text Mode using `faster_whisper`
+- Added Audio settings
+- Added `create_shortcut.bat` to create a shortcut, as opposed to launching the script in the repo everytime.
+- Bug fixes
+	- Fixed tts_settings.json breaking the script by saving settings atomically [Save as .tmp -> Replace -> if corrupted, replace file with defaults if a backup is not saved]
+	- Fixed an STT callback transcription failure, and added a processing guard that prevents overlapping transcription runs
+---
 
 ## Version 2.2 - October 2, 2025
 

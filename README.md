@@ -1,6 +1,6 @@
-# Read Aloud - Enhanced Text-to-Speech Application
+# TTSPython
 
-A modern, feature-rich text-to-speech (TTS) application built with Python and tkinter. Read Aloud allows you to convert any text into spoken words with powerful features like speech queuing, audio export, clipboard monitoring, and full customization.
+A modern, feature-rich text-to-speech (TTS) and speech-to-text (STT) application built with Python and tkinter.
 
 ![Python](https://img.shields.io/badge/python-3.8+-blue.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
@@ -21,10 +21,11 @@ A modern, feature-rich text-to-speech (TTS) application built with Python and tk
 - **🎬 Speech Queue System**: Queue multiple text sections or files for sequential playback
 - **🔊 Export Audio**: Save text as WAV/MP3 audio files with current voice settings
 - **📎 Clipboard Monitoring**: Auto-speak or auto-queue copied text from anywhere
-- **🌓 Dark/Light Theme**: Beautiful themes with persistent settings
+- **🎨 Theme Presets**: Multiple themes with persistent settings
 - **🔍 Find & Replace**: Full text search with regex support and case sensitivity
 - **⚙️ Hotkey Customization**: Customize all 10 keyboard shortcuts to your preference
 - **💾 Settings Persistence**: All preferences save automatically
+- **🎤 Offline STT**: Start/stop recording and transcribe with faster-whisper
 
 ### File Operations
 - **File Management**: Open, edit, and save text files (UTF-8 encoded)
@@ -54,17 +55,17 @@ cd TTSPython
 
 ### Step 2: Install Dependencies
 
-```bash
-pip install pyttsx3
+From a terminal opened in the project folder:
+
+```powershell
+./dependencies.bat
 ```
 
-**For Python 3.13 users (Windows):**
-```bash
-pip install pywin32
-python -m pywin32_postinstall -install
-```
-
-This fixes threading issues with Python 3.13. See `PYTHON_313_FIX.md` for details.
+What this does:
+- Checks required libraries and versions
+- Installs any missing libraries automatically
+- Does not upgrade Python
+- Does not upgrade pip
 
 ### Step 3: Run the Application
 
@@ -94,8 +95,8 @@ python TTSPython.py
 
 1. **Type or Paste Text**: Enter your text directly in the text area or paste from clipboard
 2. **Speak All**: Click "▶ Speak All" button or press `Ctrl+Enter` to speak all text
-3. **Speak Selected**: Select text, then click "▶ Speak Selected" or press `Ctrl+Shift+Enter`
-4. **Stop**: Click "■ Stop" or press `Esc` to interrupt speech
+3. **Speak Selected**: Select text, then click "▷ Speak Selected" or press `Ctrl+Shift+Enter`
+4. **Stop**: Click "⏹ Stop" or press `Esc` to interrupt speech
 5. **Watch Highlighting**: Words highlight in yellow as they're spoken (with auto-scroll)
 
 #### File Operations
@@ -156,22 +157,31 @@ Save your text as audio files:
 
 Perfect for creating audiobooks, podcasts, or voice memos!
 
-#### 🌓 Dark/Light Theme
+#### 🎨 Theme and Display
 
-Toggle between themes:
-- Click "🌓 Theme" button to switch
-- Theme persists between sessions
-- Highlights adapt to theme automatically
+Theme and display settings are managed in the Settings dialog:
+- Click "⚙ Settings"
+- Open the **Theme** tab
+- Choose your preset and save
 
 #### ⚙️ Settings & Hotkey Customization
 
 Customize your experience:
 
-1. Click "⚙️ Settings" button
+1. Click "⚙ Settings" button
 2. Click on any hotkey field
 3. Press your desired key combination
 4. Click "Save" (or "Reset to Defaults")
 5. All settings save automatically
+
+#### 🎤 Speech to Text
+
+Use offline STT directly in the app:
+1. Click `Mode: TTS` to switch to STT mode
+2. Click `● Start Recording`
+3. Speak into your microphone
+4. Click `■ Stop Recording` to transcribe and append text
+5. Use `⚙ Settings` -> `Audio` tab to pick input microphone
 
 ### Voice Management
 
@@ -190,7 +200,7 @@ Customize your experience:
 4. Download voices (100+ languages available)
 5. Click **🔄** button in app to refresh
 
-See `ADD_VOICES_GUIDE.md` for detailed instructions on adding voices.
+See `docs/ADD_VOICES_GUIDE.md` for detailed instructions on adding voices.
 
 ### Keyboard Shortcuts (Customizable!)
 
@@ -214,9 +224,10 @@ See `ADD_VOICES_GUIDE.md` for detailed instructions on adding voices.
 ### Settings File
 
 All settings are automatically saved to `tts_settings.json` in the application directory:
-- **Theme**: Dark or Light mode
+- **Theme**: Preset and display preferences
 - **Hotkeys**: Custom keyboard shortcuts
 - **Clipboard Monitor**: Enabled/disabled state
+- **Audio**: STT microphone and output preference metadata
 
 Settings load automatically on startup and save on exit.
 
@@ -226,7 +237,7 @@ On first run, the application uses:
 - **Rate**: System default (typically ~150-200 WPM)
 - **Volume**: System default (typically 1.0)
 - **Voice**: Female/neutral voice if available (Zira on Windows)
-- **Theme**: Light mode
+- **Theme**: Twilight preset
 - **Hotkeys**: Standard shortcuts (see table above)
 
 ## 📚 Documentation Files
@@ -234,11 +245,9 @@ On first run, the application uses:
 The application includes comprehensive documentation:
 
 - **`README.md`** - This file, main documentation
-- **`API.md`** - Complete API reference and technical details
+- **`docs/API.md`** - Complete API reference and technical details
 - **`CHANGELOG.md`** - Version history and release notes
-- **`PYTHON_313_FIX.md`** - Python 3.13 threading fix explanation
-- **`FIX_SUMMARY.md`** - Summary of bug fixes
-- **`INSTALL_FIX.md`** - Installation troubleshooting
+- **`docs/README.md`** - Documentation index for extended docs
 
 Run `check_voices.py` to see all available voices on your system.
 
@@ -300,7 +309,7 @@ pip install pywin32
 python -m pywin32_postinstall -install
 ```
 
-See `PYTHON_313_FIX.md` and `INSTALL_FIX.md` for details.
+See `CHANGELOG.md` for patch history and compatibility notes.
 
 ### Settings Not Saving
 
@@ -437,7 +446,7 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 - **Issues**: Open an issue on GitHub for bug reports or feature requests
 - **Discussions**: Use GitHub Discussions for questions and ideas
-- **Documentation**: Check `API.md` for technical details
+- **Documentation**: Check `docs/API.md` for technical details
 
 ## Useful Commands
 
@@ -445,12 +454,11 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 # Run the application
 python TTSPython/TTSPython.py
 
+# Install/check app dependencies from project folder
+./dependencies.bat
+
 # Check installed voices
 python check_voices.py
-
-# Install Python 3.13 fix
-pip install pywin32
-python -m pywin32_postinstall -install
 ```
 
 ---
@@ -474,7 +482,7 @@ python -m pywin32_postinstall -install
 
 ---
 
-**Enjoy using Read Aloud Enhanced!** 🎉
+**Enjoy using TTSPython!** 🎉
 
 If you find this project helpful, please consider giving it a star on GitHub ⭐
 

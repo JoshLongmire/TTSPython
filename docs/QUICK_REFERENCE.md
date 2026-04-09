@@ -4,6 +4,13 @@
 
 Your TTS application now has **7 major feature categories**:
 
+### Run dependencies once
+Open a terminal in the project folder and run:
+
+```powershell
+./dependencies.bat
+```
+
 ### 1️⃣ Core TTS Features
 - ▶ Speak All Text (`Ctrl+Enter`)
 - ▶ Speak Selected Text (`Ctrl+Shift+Enter`)
