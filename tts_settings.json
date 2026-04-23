@@ -1,0 +1,27 @@
+{
+  "theme_preset": "newvegas",
+  "clipboard_monitor": false,
+  "clipboard_auto_queue": false,
+  "clipboard_action": "queue",
+  "performance_mode": false,
+  "mode": "stt",
+  "stt_engine": "faster-whisper",
+  "stt_whisper_model": "small",
+  "stt_input_device": "",
+  "tts_output_device": "",
+  "stt_unload_model_when_idle": true,
+  "stt_auto_unload_enabled": true,
+  "stt_auto_unload_minutes": 3,
+  "hotkeys": {
+    "speak_all": "<Control-Return>",
+    "speak_selected": "<Control-Shift-Return>",
+    "stop": "<Escape>",
+    "open": "<Control-o>",
+    "save": "<Control-s>",
+    "save_as": "<Control-Shift-S>",
+    "paste": "<Control-v>",
+    "clear": "<Control-l>",
+    "find": "<Control-f>",
+    "export": "<Control-e>"
+  }
+}

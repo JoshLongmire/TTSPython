@@ -7,6 +7,7 @@ import os
 import json
 import re
 import time
+import gc
 import shutil
 import tempfile
 import wave
@@ -17,6 +18,37 @@ from datetime import datetime
 # Reduce noisy Hugging Face warnings for local/offline use.
 os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
 warnings.filterwarnings("ignore", message="You are sending unauthenticated requests to the HF Hub.*")
+
+__version__ = "3.1.0"
+
+try:
+    import pythoncom as _pythoncom  # type: ignore[import-not-found]
+except ImportError:
+    _pythoncom = None
+
+
+def _com_init_thread():
+    """Initialize COM for a worker thread (Windows / pywin32). Returns True if CoUninitialize is needed."""
+    if _pythoncom is None:
+        return False
+    try:
+        _pythoncom.CoInitialize()
+        return True
+    except Exception:
+        try:
+            _pythoncom.CoInitializeEx(_pythoncom.COINIT_MULTITHREADED)
+            return True
+        except Exception:
+            return False
+
+
+def _com_deinit_thread(com_initialized):
+    if not com_initialized or _pythoncom is None:
+        return
+    try:
+        _pythoncom.CoUninitialize()
+    except Exception:
+        pass
 
 
 THEME_PRESETS = {
@@ -77,6 +109,9 @@ DEFAULT_SETTINGS = {
     "stt_whisper_model": "small",
     "stt_input_device": "",
     "tts_output_device": "",
+    "stt_unload_model_when_idle": False,
+    "stt_auto_unload_enabled": True,
+    "stt_auto_unload_minutes": 3,
 }
 
 class ReaderApp:
@@ -107,10 +142,16 @@ class ReaderApp:
         self.stt_whisper_model = DEFAULT_SETTINGS["stt_whisper_model"]
         self.stt_input_device = DEFAULT_SETTINGS["stt_input_device"]
         self.tts_output_device = DEFAULT_SETTINGS["tts_output_device"]
+        self.stt_unload_model_when_idle = DEFAULT_SETTINGS["stt_unload_model_when_idle"]
+        self.stt_auto_unload_enabled = DEFAULT_SETTINGS["stt_auto_unload_enabled"]
+        self.stt_auto_unload_minutes = DEFAULT_SETTINGS["stt_auto_unload_minutes"]
         self.recording = False
-        self.recording_chunks = []
         self.recording_sample_rate = 16000
         self.recording_stream = None
+        self.recording_wav_path = None
+        self.recording_wav_writer = None
+        self.recording_frame_count = 0
+        self.stt_idle_unload_timer_id = None
         self.stt_processing = False
         self.stt_backends = {}
         self.last_highlight_update = 0.0
@@ -375,6 +416,17 @@ class ReaderApp:
         self.stt_whisper_model = loaded.get("stt_whisper_model", DEFAULT_SETTINGS["stt_whisper_model"])
         self.stt_input_device = loaded.get("stt_input_device", DEFAULT_SETTINGS["stt_input_device"])
         self.tts_output_device = loaded.get("tts_output_device", DEFAULT_SETTINGS["tts_output_device"])
+        self.stt_unload_model_when_idle = bool(
+            loaded.get("stt_unload_model_when_idle", DEFAULT_SETTINGS["stt_unload_model_when_idle"])
+        )
+        self.stt_auto_unload_enabled = bool(
+            loaded.get("stt_auto_unload_enabled", DEFAULT_SETTINGS["stt_auto_unload_enabled"])
+        )
+        loaded_minutes = loaded.get("stt_auto_unload_minutes", DEFAULT_SETTINGS["stt_auto_unload_minutes"])
+        try:
+            self.stt_auto_unload_minutes = max(1, min(60, int(loaded_minutes)))
+        except (TypeError, ValueError):
+            self.stt_auto_unload_minutes = DEFAULT_SETTINGS["stt_auto_unload_minutes"]
         self.hotkeys = loaded.get("hotkeys", self.get_default_hotkeys())
     
     def save_settings(self):
@@ -391,6 +443,9 @@ class ReaderApp:
                 'stt_whisper_model': self.stt_whisper_model,
                 'stt_input_device': self.stt_input_device,
                 'tts_output_device': self.tts_output_device,
+                'stt_unload_model_when_idle': self.stt_unload_model_when_idle,
+                'stt_auto_unload_enabled': self.stt_auto_unload_enabled,
+                'stt_auto_unload_minutes': self.stt_auto_unload_minutes,
                 'hotkeys': self.hotkeys
             }
             # Write atomically to avoid partial/corrupt JSON on interruption.
@@ -422,7 +477,7 @@ class ReaderApp:
         for action, key in self.hotkeys.items():
             try:
                 self.root.unbind(key)
-            except:
+            except tk.TclError:
                 pass
         
         # Bind shortcuts
@@ -438,6 +493,10 @@ class ReaderApp:
         self.root.bind(self.hotkeys['export'], lambda e: self.on_export_audio())
 
     def toggle_mode(self):
+        if self.current_mode == "stt" and self.stt_unload_model_when_idle:
+            self._release_stt_model()
+        elif self.current_mode == "stt":
+            self._schedule_stt_idle_unload()
         self.current_mode = "stt" if self.current_mode == "tts" else "tts"
         self.refresh_mode_ui()
         self.save_settings()
@@ -495,7 +554,26 @@ class ReaderApp:
             messagebox.showerror("STT dependency missing", f"Please install STT dependencies.\n\n{exc}")
             return
 
-        self.recording_chunks = []
+        temp_fd, wav_path = tempfile.mkstemp(prefix="stt_recording_", suffix=".wav")
+        os.close(temp_fd)
+        wav_writer = None
+        try:
+            wav_writer = wave.open(wav_path, "wb")
+            wav_writer.setnchannels(1)
+            wav_writer.setsampwidth(2)
+            wav_writer.setframerate(self.recording_sample_rate)
+        except Exception:
+            if wav_writer:
+                wav_writer.close()
+            if os.path.exists(wav_path):
+                os.remove(wav_path)
+            messagebox.showerror("STT Error", "Could not prepare recording file.")
+            return
+
+        self.recording_wav_path = wav_path
+        self.recording_wav_writer = wav_writer
+        self.recording_frame_count = 0
+        self._cancel_stt_idle_unload()
         self.recording = True
         self.stt_record_btn.configure(text="■ Stop Recording")
         self.stt_status.configure(text="Recording... (faster-whisper)")
@@ -509,7 +587,10 @@ class ReaderApp:
                 device_arg = selected_input
 
         def _audio_callback(indata, frames, callback_time, status):
-            self.recording_chunks.append(indata.copy())
+            writer = self.recording_wav_writer
+            if writer:
+                writer.writeframes(indata.tobytes())
+                self.recording_frame_count += frames
 
         try:
             self.recording_stream = sd.InputStream(
@@ -522,6 +603,13 @@ class ReaderApp:
             self.recording_stream.start()
         except Exception as exc:
             self.recording = False
+            if self.recording_wav_writer:
+                self.recording_wav_writer.close()
+            self.recording_wav_writer = None
+            if self.recording_wav_path and os.path.exists(self.recording_wav_path):
+                os.remove(self.recording_wav_path)
+            self.recording_wav_path = None
+            self.recording_frame_count = 0
             self.stt_record_btn.configure(text="● Start Recording")
             self.stt_status.configure(text="STT recording failed")
             messagebox.showerror("STT Error", f"Could not start recording:\n{exc}")
@@ -541,32 +629,27 @@ class ReaderApp:
                 stream.close()
             except Exception:
                 pass
+        writer = self.recording_wav_writer
+        self.recording_wav_writer = None
+        if writer:
+            try:
+                writer.close()
+            except Exception:
+                pass
         threading.Thread(target=self._transcribe_recorded_audio_worker, daemon=True).start()
 
     def _transcribe_recorded_audio_worker(self):
-        try:
-            import numpy as np
-        except Exception as exc:
-            self.root.after(0, lambda m=str(exc): messagebox.showerror("STT Error", f"Numpy missing:\n{m}"))
-            self.root.after(0, self._finish_stt_run)
-            return
+        wav_path = self.recording_wav_path
+        self.recording_wav_path = None
+        frame_count = self.recording_frame_count
+        self.recording_frame_count = 0
 
-        if not self.recording_chunks:
+        if not wav_path or frame_count <= 0:
             self.root.after(0, lambda: self.stt_status.configure(text="No audio captured"))
             self.root.after(0, self._finish_stt_run)
             return
 
-        wav_path = None
         try:
-            audio = np.concatenate(self.recording_chunks, axis=0)
-            temp_fd, wav_path = tempfile.mkstemp(prefix="stt_", suffix=".wav")
-            os.close(temp_fd)
-            with wave.open(wav_path, "wb") as wf:
-                wf.setnchannels(1)
-                wf.setsampwidth(2)
-                wf.setframerate(self.recording_sample_rate)
-                wf.writeframes(np.asarray(audio).tobytes())
-
             text = self._transcribe_with_whisper(wav_path)
             self.root.after(0, lambda t=text: self._insert_transcript(t))
         except Exception as exc:
@@ -584,12 +667,27 @@ class ReaderApp:
     def _transcribe_with_whisper(self, wav_path):
         if "whisper_model" not in self.stt_backends:
             from faster_whisper import WhisperModel
-            model = WhisperModel(self.stt_whisper_model, device="cpu", compute_type="int8")
+            cpu_threads = os.cpu_count() or 4
+            model = WhisperModel(
+                self.stt_whisper_model,
+                device="cpu",
+                compute_type="int8",
+                cpu_threads=cpu_threads
+            )
             self.stt_backends["whisper_model"] = model
-        segments, _ = self.stt_backends["whisper_model"].transcribe(wav_path, beam_size=1)
+        segments, _ = self.stt_backends["whisper_model"].transcribe(
+            wav_path,
+            beam_size=1,
+            best_of=1,
+            temperature=0.0,
+            condition_on_previous_text=True,
+            vad_filter=True,
+            initial_prompt="Use normal capitalization and punctuation."
+        )
         return " ".join((seg.text or "").strip() for seg in segments).strip()
 
     def _insert_transcript(self, text):
+        text = self._normalize_transcript_text(text)
         if not text:
             self.stt_status.configure(text="No speech detected")
             return
@@ -598,13 +696,67 @@ class ReaderApp:
         self.stt_status.configure(text="Transcription complete")
         self.status_var.set("Transcript inserted")
 
+    def _normalize_transcript_text(self, text):
+        """Light-touch punctuation cleanup without changing word content."""
+        cleaned = " ".join((text or "").split()).strip()
+        if not cleaned:
+            return ""
+
+        # Capitalize the first alphabetical character.
+        for idx, ch in enumerate(cleaned):
+            if ch.isalpha():
+                cleaned = cleaned[:idx] + ch.upper() + cleaned[idx + 1:]
+                break
+
+        # Add sentence-ending punctuation only if missing.
+        if cleaned[-1] not in ".!?":
+            cleaned += "."
+
+        return cleaned
+
     def _finish_stt_run(self):
         self.recording = False
         self.stt_processing = False
         self.stt_record_btn.configure(text="● Start Recording")
+        if self.stt_unload_model_when_idle:
+            self._release_stt_model()
+        else:
+            self._schedule_stt_idle_unload()
         if self.current_mode == "stt":
             if not self.stt_status.cget("text").strip():
                 self.stt_status.configure(text="Offline STT ready")
+
+    def _release_stt_model(self):
+        self._cancel_stt_idle_unload()
+        model = self.stt_backends.pop("whisper_model", None)
+        if model is not None:
+            del model
+            gc.collect()
+
+    def _cancel_stt_idle_unload(self):
+        timer_id = self.stt_idle_unload_timer_id
+        self.stt_idle_unload_timer_id = None
+        if timer_id:
+            try:
+                self.root.after_cancel(timer_id)
+            except tk.TclError:
+                pass
+
+    def _schedule_stt_idle_unload(self):
+        self._cancel_stt_idle_unload()
+        if not self.stt_auto_unload_enabled:
+            return
+        if self.recording or self.stt_processing:
+            return
+        delay_ms = max(1, int(self.stt_auto_unload_minutes)) * 60 * 1000
+        self.stt_idle_unload_timer_id = self.root.after(delay_ms, self._on_stt_idle_timeout)
+
+    def _on_stt_idle_timeout(self):
+        self.stt_idle_unload_timer_id = None
+        if self.recording or self.stt_processing:
+            self._schedule_stt_idle_unload()
+            return
+        self._release_stt_model()
     
     def apply_theme(self):
         """Apply selected theme preset."""
@@ -742,7 +894,10 @@ class ReaderApp:
                         self.speech_queue.append({'text': current_clipboard, 'name': f"📋 Clipboard: {preview}"})
                         self.update_queue_display()
                         self.status_var.set(f"Clipboard added to queue ({len(self.speech_queue)} items)")
-        except:
+        except (tk.TclError, UnicodeDecodeError):
+            pass
+        except Exception:
+            # Non-text clipboard or transient failures; keep polling.
             pass
         
         # Use longer polling in performance mode to lower idle CPU
@@ -839,23 +994,7 @@ class ReaderApp:
     
     def _play_queue_worker(self):
         """Worker thread to play queue items sequentially"""
-        com_initialized = False
-        
-        # Initialize COM for this thread
-        try:
-            import pythoncom
-            # Try CoInitialize first
-            pythoncom.CoInitialize()
-            com_initialized = True
-        except Exception:
-            # If CoInitialize fails, try CoInitializeEx
-            try:
-                import pythoncom
-                pythoncom.CoInitializeEx(pythoncom.COINIT_MULTITHREADED)
-                com_initialized = True
-            except Exception:
-                # If both fail, try without COM initialization
-                pass
+        com_initialized = _com_init_thread()
         
         try:
             while self.queue_playing and self.current_queue_index < len(self.speech_queue):
@@ -865,14 +1004,16 @@ class ReaderApp:
                 item = self.speech_queue[self.current_queue_index]
                 self.speaking = True
                 
-                # Update UI to show current item
-                self.root.after(0, lambda: self.update_queue_display())
-                self.root.after(0, lambda idx=self.current_queue_index: 
-                               self.status_var.set(f"Playing queue item {idx+1} of {len(self.speech_queue)}"))
-                
-                # Disable buttons
-                self.root.after(0, lambda: self.speak_btn.state(["disabled"]))
-                self.root.after(0, lambda: self.speak_selected_btn.state(["disabled"]))
+                idx = self.current_queue_index
+                nq = len(self.speech_queue)
+
+                def _queue_item_ui(i=idx, n=nq):
+                    self.update_queue_display()
+                    self.status_var.set(f"Playing queue item {i+1} of {n}")
+                    self.speak_btn.state(["disabled"])
+                    self.speak_selected_btn.state(["disabled"])
+
+                self.root.after(0, _queue_item_ui)
                 
                 # Speak the item
                 engine = None
@@ -902,7 +1043,7 @@ class ReaderApp:
                             if engine in self.all_engines:
                                 self.all_engines.remove(engine)
                             del engine
-                        except:
+                        except Exception:
                             pass
                     
                     self.current_engine = None
@@ -918,15 +1059,16 @@ class ReaderApp:
             self.queue_playing = False
             self.current_queue_index = -1
             
-            if self.stop_requested or self.global_stop_requested:
-                self.root.after(0, lambda: self.status_var.set("Queue playback stopped"))
-            else:
-                self.root.after(0, lambda: self.status_var.set("Queue playback completed"))
-            
-            self.root.after(0, lambda: self.speak_btn.state(["!disabled"]))
-            self.root.after(0, lambda: self.speak_selected_btn.state(["!disabled"]))
-            self.root.after(0, lambda: self.update_queue_display())
-            self.root.after(0, lambda: self.txt.tag_remove(self.highlight_tag, "1.0", "end"))
+            stopped = self.stop_requested or self.global_stop_requested
+
+            def _queue_playback_finished_ui():
+                self.status_var.set("Queue playback stopped" if stopped else "Queue playback completed")
+                self.speak_btn.state(["!disabled"])
+                self.speak_selected_btn.state(["!disabled"])
+                self.update_queue_display()
+                self.txt.tag_remove(self.highlight_tag, "1.0", "end")
+
+            self.root.after(0, _queue_playback_finished_ui)
             
             # If there are more queued items and auto-queue is enabled, continue playing
             # Only continue if there are items beyond what we just played
@@ -936,17 +1078,16 @@ class ReaderApp:
         except Exception as e:
             self.queue_playing = False
             self.current_queue_index = -1
-            self.root.after(0, lambda: messagebox.showerror("Queue Error", f"Queue playback failed: {str(e)}"))
-            self.root.after(0, lambda: self.speak_btn.state(["!disabled"]))
-            self.root.after(0, lambda: self.speak_selected_btn.state(["!disabled"]))
+            err = str(e)
+
+            def _queue_error_ui():
+                messagebox.showerror("Queue Error", f"Queue playback failed: {err}")
+                self.speak_btn.state(["!disabled"])
+                self.speak_selected_btn.state(["!disabled"])
+
+            self.root.after(0, _queue_error_ui)
         finally:
-            # Uninitialize COM if it was initialized
-            if com_initialized:
-                try:
-                    import pythoncom
-                    pythoncom.CoUninitialize()
-                except:
-                    pass
+            _com_deinit_thread(com_initialized)
 
     def _on_rate_change(self, value):
         self.rate.set(int(float(value)))
@@ -1159,25 +1300,9 @@ class ReaderApp:
     def _speak_worker(self, text):
         """Worker thread for speaking text - with Python 3.13 fix"""
         engine = None
-        com_initialized = False
+        com_initialized = _com_init_thread()
         
         try:
-            # Try to initialize COM for this thread (Windows-specific fix for Python 3.13)
-            try:
-                import pythoncom
-                # Try CoInitialize first
-                pythoncom.CoInitialize()
-                com_initialized = True
-            except Exception:
-                # If CoInitialize fails, try CoInitializeEx
-                try:
-                    import pythoncom
-                    pythoncom.CoInitializeEx(pythoncom.COINIT_MULTITHREADED)
-                    com_initialized = True
-                except Exception:
-                    # If both fail, try without COM initialization
-                    pass
-            
             # Create a fresh engine for each speech to avoid lifecycle issues
             engine = pyttsx3.init()
             self.current_engine = engine  # Store reference for stop functionality
@@ -1228,27 +1353,23 @@ class ReaderApp:
                     if engine in self.all_engines:
                         self.all_engines.remove(engine)
                     del engine
-                except:
+                except Exception:
                     pass
             
-            # Uninitialize COM if it was initialized
-            if com_initialized:
-                try:
-                    import pythoncom
-                    pythoncom.CoUninitialize()
-                except:
-                    pass
+            _com_deinit_thread(com_initialized)
             
             self.current_engine = None
             self.speaking = False
-            self.root.after(0, lambda: self.speak_btn.state(["!disabled"]))
-            self.root.after(0, lambda: self.speak_selected_btn.state(["!disabled"]))
-            
-            # If there are queued items and auto-queue is enabled, start playing the queue
-            if self.speech_queue and self.clipboard_auto_queue and not self.queue_playing:
-                self.root.after(0, lambda: self._start_auto_queue())
-            else:
-                self.root.after(0, lambda: self.status_var.set("Ready"))
+
+            def _speak_worker_finished_ui():
+                self.speak_btn.state(["!disabled"])
+                self.speak_selected_btn.state(["!disabled"])
+                if self.speech_queue and self.clipboard_auto_queue and not self.queue_playing:
+                    self._start_auto_queue()
+                else:
+                    self.status_var.set("Ready")
+
+            self.root.after(0, _speak_worker_finished_ui)
     
     def highlight_word(self, location, length):
         """Highlight the current word being spoken"""
@@ -1330,6 +1451,7 @@ class ReaderApp:
         threading.Thread(target=self._play_queue_worker, daemon=True).start()
 
     def on_close(self):
+        self._cancel_stt_idle_unload()
         if self.recording:
             self.stop_stt_recording()
         self.save_settings()
@@ -1437,7 +1559,6 @@ class SearchDialog:
                 new_content = content.replace(search_term, replace_term)
             else:
                 # Case insensitive replace
-                import re
                 pattern = re.compile(re.escape(search_term), re.IGNORECASE)
                 new_content = pattern.sub(replace_term, content)
                 count = len(pattern.findall(content))
@@ -1601,11 +1722,32 @@ class SettingsDialog:
             text="TTS output follows Windows default playback device for pyttsx3.",
             foreground="#666666"
         ).grid(row=2, column=0, columnspan=2, sticky="w")
+        self.stt_unload_var = tk.BooleanVar(value=self.app.stt_unload_model_when_idle)
+        ttk.Checkbutton(
+            audio_frame,
+            text="Unload STT model when idle (saves RAM, slower next transcript start)",
+            variable=self.stt_unload_var
+        ).grid(row=3, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        self.stt_auto_unload_enabled_var = tk.BooleanVar(value=self.app.stt_auto_unload_enabled)
+        ttk.Checkbutton(
+            audio_frame,
+            text="Auto-unload STT model after idle time",
+            variable=self.stt_auto_unload_enabled_var
+        ).grid(row=4, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        ttk.Label(audio_frame, text="Auto-unload delay (minutes)").grid(row=5, column=0, sticky="w", pady=(0, 8))
+        self.stt_auto_unload_minutes_var = tk.IntVar(value=self.app.stt_auto_unload_minutes)
+        ttk.Spinbox(
+            audio_frame,
+            from_=1,
+            to=60,
+            textvariable=self.stt_auto_unload_minutes_var,
+            width=8
+        ).grid(row=5, column=1, sticky="w", pady=(0, 8))
         ttk.Button(
             audio_frame,
             text="Open Windows Sound Output Settings",
             command=self.app.open_sound_output_settings
-        ).grid(row=3, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        ).grid(row=6, column=0, columnspan=2, sticky="w", pady=(8, 0))
         audio_frame.columnconfigure(1, weight=1)
 
         # Dialog buttons
@@ -1663,6 +1805,16 @@ class SettingsDialog:
             self.app.performance_var.set(self.app.performance_mode)
         self.app.stt_input_device = self.input_map.get(self.input_var.get(), "")
         self.app.tts_output_device = self.output_map.get(self.output_var.get(), "")
+        self.app.stt_unload_model_when_idle = self.stt_unload_var.get()
+        self.app.stt_auto_unload_enabled = self.stt_auto_unload_enabled_var.get()
+        try:
+            self.app.stt_auto_unload_minutes = max(1, min(60, int(self.stt_auto_unload_minutes_var.get())))
+        except (TypeError, ValueError):
+            self.app.stt_auto_unload_minutes = DEFAULT_SETTINGS["stt_auto_unload_minutes"]
+        if self.app.stt_unload_model_when_idle:
+            self.app._release_stt_model()
+        else:
+            self.app._schedule_stt_idle_unload()
 
         self.app.save_settings()
         messagebox.showinfo("Settings", "Settings saved successfully")
@@ -1690,6 +1842,9 @@ class SettingsDialog:
                 current_output_label = label
                 break
         self.output_var.set(current_output_label)
+        self.stt_unload_var.set(self.app.stt_unload_model_when_idle)
+        self.stt_auto_unload_enabled_var.set(self.app.stt_auto_unload_enabled)
+        self.stt_auto_unload_minutes_var.set(self.app.stt_auto_unload_minutes)
     
     def reset_defaults(self):
         """Reset to default hotkeys"""

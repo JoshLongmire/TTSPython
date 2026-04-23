@@ -1,5 +1,26 @@
 # Changelog - TTSPython
 
+## Version 3.1.0 - April 23, 2026
+- Performance update (same STT model quality defaults)
+  - STT recording now streams directly to a temporary WAV file instead of buffering full chunks in memory, and no longer uses a full `numpy.concatenate` recording path before transcription.
+  - **Measured impact (Resource Tracker, auto-unload OFF):** up to **~9.9% lower peak RAM** in matched runs (799.7 MB -> 720.4 MB).
+  - **Measured impact (Resource Tracker, auto-unload ON):**
+    - **~30.6% lower peak RAM** in matched runs (799.7 MB -> 555.3 MB)
+    - **~41.6% lower post-STT resident RAM** in matched runs (573.8 MB -> 334.9 MB)
+  - **Interpretation:** early 3.1.0 runs show clear peak memory improvements from the new recording path, with additional tuning/validation in progress.
+  - **User impact:** lower worst case memory spikes during STT capture/transcription and better headroom on lower memory systems, while keeping the same Whisper model quality target.
+  - Added optional STT model unload controls:
+    - Immediate unload when idle (toggle)
+    - Auto-unload timer after configurable idle minutes
+  - **User impact:** can reduce idle memory footprint between STT uses (with slower first transcript after unload), without downgrading model size.
+- Responsiveness and stability cleanup
+  - Centralized Windows COM thread init/deinit for TTS worker threads.
+  - Batched several queue/speech UI `root.after(0, ...)` updates to reduce unnecessary main-thread wakeups.
+  - Replaced broad bare exception handling in hot paths with explicit exception handling where safe.
+  - Removed a redundant local `re` import in Find/Replace and tightened one shortcut unbind exception to `tk.TclError`.
+  - **User impact:** cleaner internals, slightly smoother UI update behavior under load, and easier future maintenance.
+---
+
 ## Version 3.0 - April 9, 2026
 - Added Pure Tech as a collaborator for their help in 3.0
 - Huge UI Changes
