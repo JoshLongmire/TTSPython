@@ -19,7 +19,7 @@ from datetime import datetime
 os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
 warnings.filterwarnings("ignore", message="You are sending unauthenticated requests to the HF Hub.*")
 
-__version__ = "3.1.0"
+__version__ = "4.0.0"
 
 try:
     import pythoncom as _pythoncom  # type: ignore[import-not-found]
@@ -49,6 +49,178 @@ def _com_deinit_thread(com_initialized):
         _pythoncom.CoUninitialize()
     except Exception:
         pass
+
+
+# --- Color emoji rendering -------------------------------------------------
+# Tk paints color-emoji fonts as monochrome outline glyphs on Windows, so we
+# render emoji to color bitmaps with Pillow and place them as tk.PhotoImage.
+# Any failure (Pillow missing, no usable font) returns None so callers fall
+# back to text-only. The cache keeps PhotoImage objects alive — Tk blanks a
+# widget when its image is garbage-collected.
+def _find_emoji_font():
+    """Return a path or family name for a color-emoji font, or None."""
+    candidates = []
+    system_root = os.environ.get("SystemRoot", r"C:\Windows")
+    if sys.platform.startswith("win"):
+        candidates.append(os.path.join(system_root, "Fonts", "seguiemj.ttf"))
+    if os.environ.get("NOTO_COLOR_EMOJI"):
+        candidates.append(os.environ["NOTO_COLOR_EMOJI"])
+    candidates += [
+        "/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf",
+        "/usr/share/fonts/opentype/noto/NotoColorEmoji.ttf",
+        "/usr/share/fonts/noto/NotoColorEmoji.ttf",
+        "/System/Library/Fonts/Apple Color Emoji.ttf",
+        r"C:\Windows\Fonts\seguiemj.ttf",
+    ]
+    for path in candidates:
+        if path and os.path.exists(path):
+            return path
+    # Fall back to family names Pillow can resolve.
+    for name in ("Segoe UI Emoji", "Noto Color Emoji", "Symbola"):
+        try:
+            from PIL import ImageFont
+            ImageFont.truetype(name, 16)
+            return name
+        except Exception:
+            pass
+    return None
+
+
+_EMOJI_IMAGES = {}
+_EMOJI_FONT = None
+
+
+def emoji_icon(char, size=16):
+    """Render a single emoji as a color ``tk.PhotoImage`` (cached).
+
+    Returns ``None`` if rendering is unavailable so callers can fall back to
+    text-only labels.
+    """
+    global _EMOJI_FONT
+    # Strip emoji variation selectors (U+FE0F emoji / U+FE0E text). On Segoe UI
+    # Emoji these render a stray mark that shifts the glyph left/right and gets
+    # clipped; the color glyph still renders without them.
+    clean_char = char.replace("\ufe0f", "").replace("\ufe0e", "")
+    cache_key = (clean_char, size, _EMOJI_FONT is not None)
+    if cache_key in _EMOJI_IMAGES:
+        return _EMOJI_IMAGES[cache_key]
+    image = None
+    try:
+        from PIL import Image, ImageDraw, ImageFont, ImageTk
+        if _EMOJI_FONT is None:
+            _EMOJI_FONT = _find_emoji_font()
+        if _EMOJI_FONT is not None:
+            # Render larger than the target so the glyph fits with margin, then
+            # center it on the canvas. Emoji ink boxes are larger than the font
+            # size and often drift off-center, so drawing at (0,0) clips them.
+            # Crop to the actual ink and recenter before scaling down so glyphs
+            # (e.g. ▶ ⏹ ⬆) are centered and not clipped.
+            render = size * 3
+            font = ImageFont.truetype(_EMOJI_FONT, int(render * 0.85))
+            img = Image.new("RGBA", (render, render), (0, 0, 0, 0))
+            ImageDraw.Draw(img).text(
+                (render / 2, render / 2), clean_char, font=font,
+                embedded_color=True, anchor="mm"
+            )
+            bbox = img.getbbox()
+            if bbox:
+                glyph = img.crop(bbox)
+                img = Image.new("RGBA", (render, render), (0, 0, 0, 0))
+                img.paste(glyph, ((render - glyph.width) // 2, (render - glyph.height) // 2), glyph)
+            img = img.resize((size, size), Image.LANCZOS)
+            image = ImageTk.PhotoImage(img)
+    except Exception:
+        image = None
+    _EMOJI_IMAGES[cache_key] = image
+    return image
+
+
+# --- Color helpers (used by the theme/design system and the gradient header) ---
+def _clamp_channel(value):
+    return max(0, min(255, int(round(value))))
+
+
+def _hex_to_rgb(color):
+    color = str(color).lstrip("#")
+    if len(color) == 3:
+        color = "".join(ch * 2 for ch in color)
+    try:
+        return (int(color[0:2], 16), int(color[2:4], 16), int(color[4:6], 16))
+    except (ValueError, IndexError):
+        return (30, 30, 30)
+
+
+def _rgb_to_hex(rgb):
+    return "#%02x%02x%02x" % (_clamp_channel(rgb[0]), _clamp_channel(rgb[1]), _clamp_channel(rgb[2]))
+
+
+def _mix(color_a, color_b, t):
+    """Linear blend from color_a (t=0) to color_b (t=1)."""
+    t = max(0.0, min(1.0, t))
+    ra, ga, ba = _hex_to_rgb(color_a)
+    rb, gb, bb = _hex_to_rgb(color_b)
+    return _rgb_to_hex((ra + (rb - ra) * t, ga + (gb - ga) * t, ba + (bb - ba) * t))
+
+
+def _lighten(color, t=0.12):
+    return _mix(color, "#ffffff", t)
+
+
+def _darken(color, t=0.12):
+    return _mix(color, "#000000", t)
+
+
+def _relative_luminance(color):
+    r, g, b = (c / 255.0 for c in _hex_to_rgb(color))
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+
+def _is_dark(color):
+    return _relative_luminance(color) < 0.5
+
+
+def _contrast_text(bg, light="#ffffff", dark="#111111"):
+    return dark if _relative_luminance(bg) > 0.55 else light
+
+
+def _normalize_theme(theme):
+    """Return a theme dict with every design-system key present.
+
+    Old/custom presets that only define the original 8 keys still load: any
+    missing key is derived from the base colors so the UI stays cohesive.
+    """
+    t = dict(theme or {})
+    bg = t.setdefault("bg", "#1e1e1e")
+    dark = _is_dark(bg)
+    bg_elev = t.setdefault("bg_elev", _lighten(bg, 0.06) if dark else _darken(bg, 0.03))
+    text = t.setdefault("text", "#d4d4d4" if dark else "#111827")
+    accent = t.setdefault("accent", "#3b82f6")
+    t.setdefault("border", _lighten(bg, 0.22) if dark else _darken(bg, 0.16))
+    t.setdefault("muted", _mix(text, bg, 0.4))
+    t.setdefault("danger", "#f87171")
+    t.setdefault("name", "Custom")
+
+    # Gradient header
+    t.setdefault("header", _mix(bg_elev, accent, 0.22 if dark else 0.14))
+    t.setdefault("header2", _mix(bg, accent, 0.06))
+    t.setdefault("header_text", _contrast_text(t["header"], _lighten(text, 0.2), _darken(text, 0.1)))
+
+    # Buttons
+    t.setdefault("button", _lighten(bg_elev, 0.05) if dark else _darken(bg_elev, 0.02))
+    t.setdefault("button_text", text)
+    t.setdefault("button_hover", _mix(t["button"], accent, 0.34))
+    t.setdefault("button_active", accent)
+
+    # Fields (entries, combos, text areas)
+    t.setdefault("field", bg_elev)
+    t.setdefault("field_text", text)
+    t.setdefault("field_border", t["border"])
+
+    # States and misc
+    t.setdefault("disabled", _mix(bg_elev, bg, 0.5))
+    t.setdefault("disabled_text", _mix(t["muted"], bg, 0.35))
+    t.setdefault("on_accent", _contrast_text(accent))
+    return t
 
 
 THEME_PRESETS = {
@@ -98,6 +270,9 @@ THEME_PRESETS = {
     },
 }
 
+# Fill in derived design-system keys so every preset is complete and cohesive.
+THEME_PRESETS = {key: _normalize_theme(value) for key, value in THEME_PRESETS.items()}
+
 DEFAULT_SETTINGS = {
     "theme_preset": "twilight",
     "clipboard_monitor": False,
@@ -113,6 +288,72 @@ DEFAULT_SETTINGS = {
     "stt_auto_unload_enabled": True,
     "stt_auto_unload_minutes": 3,
 }
+
+class GradientHeader(tk.Canvas):
+    """A canvas header that paints a horizontal gradient behind a title and,
+    optionally, a small cluster of ttk controls docked to the right edge.
+
+    The gradient is redrawn on ``<Configure>`` (resize) — no timers involved.
+    """
+
+    _title_font = None
+    _subtitle_font = None
+
+    @classmethod
+    def _shared_fonts(cls):
+        # Lazily create shared fonts once (requires a live Tk root) so opening
+        # dialogs repeatedly does not accumulate new Font objects.
+        if cls._title_font is None:
+            cls._title_font = tkfont.Font(family="Segoe UI", size=15, weight="bold")
+            cls._subtitle_font = tkfont.Font(family="Segoe UI", size=8)
+        return cls._title_font, cls._subtitle_font
+
+    def __init__(self, master, title="", subtitle="", height=60, **kwargs):
+        super().__init__(master, height=height, highlightthickness=0, bd=0, **kwargs)
+        self._title = title
+        self._subtitle = subtitle
+        self._c1 = "#2b2f3a"
+        self._c2 = "#1f2330"
+        self._title_color = "#ffffff"
+        self._subtitle_color = "#c8c8c8"
+        self._title_font, self._subtitle_font = self._shared_fonts()
+        # A frame docked to the right for interactive controls (buttons, combos).
+        self.controls = ttk.Frame(self, style="Header.TFrame")
+        self._controls_item = self.create_window(0, 0, window=self.controls, anchor="e")
+        self.bind("<Configure>", lambda _e: self.redraw())
+
+    def apply_colors(self, c1, c2, title_color, subtitle_color):
+        self._c1 = c1
+        self._c2 = c2
+        self._title_color = title_color
+        self._subtitle_color = subtitle_color
+        self.configure(bg=c1)
+        self.redraw()
+
+    def redraw(self):
+        self.delete("grad")
+        w = self.winfo_width()
+        h = self.winfo_height()
+        if w <= 1:
+            return
+        steps = 60
+        for i in range(steps):
+            t = i / (steps - 1)
+            color = _mix(self._c1, self._c2, t)
+            x0 = int(w * i / steps)
+            x1 = int(w * (i + 1) / steps) + 1
+            self.create_rectangle(x0, 0, x1, h, outline=color, fill=color, tags="grad")
+        if self._title:
+            ty = (h // 2 - 8) if self._subtitle else (h // 2)
+            self.create_text(18, ty, text=self._title, anchor="w",
+                             fill=self._title_color, font=self._title_font, tags="grad")
+        if self._subtitle:
+            self.create_text(19, h // 2 + 11, text=self._subtitle, anchor="w",
+                             fill=self._subtitle_color, font=self._subtitle_font, tags="grad")
+        # Keep the gradient/text under the docked control widgets.
+        self.tag_lower("grad")
+        self.coords(self._controls_item, w - 14, h // 2)
+
 
 class ReaderApp:
     def __init__(self, root):
@@ -185,35 +426,56 @@ class ReaderApp:
         self.ui_font_family = "Segoe UI"
         self.base_font = tkfont.Font(family=self.ui_font_family, size=10)
         self.text_font = tkfont.Font(family=self.ui_font_family, size=11)
-        self.txt = tk.Text(root, wrap="word", height=16, undo=True, font=self.text_font)
-        self.txt.pack(fill="both", expand=True, padx=10, pady=(10, 6))
-        
+
+        # Theme option lookups (used by the header switcher and the Settings dialog).
+        self.theme_options = [THEME_PRESETS[k]["name"] for k in THEME_PRESETS]
+        self.theme_id_by_name = {THEME_PRESETS[k]["name"]: k for k in THEME_PRESETS}
+        self.theme_name_var = tk.StringVar(
+            value=THEME_PRESETS[self.theme_preset]["name"] if self.theme_preset in THEME_PRESETS else "Twilight"
+        )
+
+        # Gradient header bar: title/version on the left, quick controls on the right.
+        self.header = GradientHeader(
+            root,
+            title=f"TTSPython {__version__}",
+            subtitle="",
+            height=60,
+        )
+        self.header.pack(fill="x", side="top")
+        self.mode_var = tk.StringVar(value=self.current_mode)
+        self.mode_toggle = ttk.Button(
+            self.header.controls, text="Mode: TTS", command=self.toggle_mode, style="Header.TButton"
+        )
+        self.mode_toggle.pack(side="left")
+
+        # Text editor area with scrollbar (wrapped so they align cleanly).
+        text_frame = ttk.Frame(root)
+        self.text_frame = text_frame
+        text_frame.pack(fill="both", expand=True, padx=10, pady=(10, 6))
+        self.txt = tk.Text(text_frame, wrap="word", height=16, undo=True, font=self.text_font)
+        scrollbar = ttk.Scrollbar(text_frame, orient="vertical", command=self.txt.yview)
+        scrollbar.pack(side="right", fill="y")
+        self.txt.pack(side="left", fill="both", expand=True)
+        self.txt.configure(yscrollcommand=scrollbar.set)
+
         # Configure highlight tag
         self.txt.tag_config(self.highlight_tag, background="yellow", foreground="black")
-        
-        # Add scrollbar
-        scrollbar = ttk.Scrollbar(root, orient="vertical", command=self.txt.yview)
-        scrollbar.pack(side="right", fill="y")
-        self.txt.configure(yscrollcommand=scrollbar.set)
 
         controls = ttk.Frame(root)
         self.controls_frame = controls
         controls.pack(fill="x", padx=10, pady=(0,10))
 
-        self.speak_btn = ttk.Button(controls, text="▶ Speak All", command=self.on_speak)
-        self.speak_selected_btn = ttk.Button(controls, text="▷ Speak Selected", command=self.on_speak_selected)
-        self.stop_btn  = ttk.Button(controls, text="⏹ Stop",  command=self.on_stop)
-        paste_btn      = ttk.Button(controls, text="⎘ Paste", command=self.on_paste)
-        clear_btn      = ttk.Button(controls, text="⌫ Clear", command=self.on_clear)
-        self.mode_var = tk.StringVar(value=self.current_mode)
-        self.mode_toggle = ttk.Button(controls, text="Mode: TTS", command=self.toggle_mode)
+        self.speak_btn = ttk.Button(controls, text="Speak All", image=emoji_icon("▶️"), compound=tk.LEFT, command=self.on_speak, style="Accent.TButton")
+        self.speak_selected_btn = ttk.Button(controls, text="Speak Selected", image=emoji_icon("🗣️"), compound=tk.LEFT, command=self.on_speak_selected)
+        self.stop_btn  = ttk.Button(controls, text="Stop", image=emoji_icon("⏹️"), compound=tk.LEFT, command=self.on_stop)
+        paste_btn      = ttk.Button(controls, text="Paste", image=emoji_icon("📋"), compound=tk.LEFT, command=self.on_paste)
+        clear_btn      = ttk.Button(controls, text="Clear", image=emoji_icon("🧹"), compound=tk.LEFT, command=self.on_clear)
 
         self.speak_btn.grid(row=0, column=0, padx=(0,6))
         self.speak_selected_btn.grid(row=0, column=1, padx=(0,6))
         self.stop_btn.grid(row=0, column=2, padx=(0,6))
         paste_btn.grid(row=0, column=3, padx=(0,6))
         clear_btn.grid(row=0, column=4, padx=(0,12))
-        self.mode_toggle.grid(row=0, column=5, padx=(0,8))
 
         # Rate
         ttk.Label(controls, text="Rate").grid(row=0, column=6, padx=(16,4))
@@ -247,9 +509,9 @@ class ReaderApp:
         self.voice_combo.grid(row=0, column=11, padx=(0,4))
         
         # Refresh voices button
-        refresh_voices_btn = ttk.Button(controls, text="Refresh", command=self.refresh_voices)
+        refresh_voices_btn = ttk.Button(controls, text="🔄 Refresh", command=self.refresh_voices)
         refresh_voices_btn.grid(row=0, column=12, padx=(0,0))
-        voices_settings_btn = ttk.Button(controls, text="➕ Voices", command=self.open_voice_settings)
+        voices_settings_btn = ttk.Button(controls, text="🎙️ Voices", command=self.open_voice_settings)
         voices_settings_btn.grid(row=0, column=13, padx=(6,0))
 
         controls.columnconfigure(7, weight=1)
@@ -260,20 +522,17 @@ class ReaderApp:
         self.file_frame = file_frame
         file_frame.pack(fill="x", padx=10, pady=(0,5))
         
-        open_btn = ttk.Button(file_frame, text="⌂ Open", command=self.on_open)
-        save_btn = ttk.Button(file_frame, text="⇩ Save", command=self.on_save)
-        save_as_btn = ttk.Button(file_frame, text="⇩ Save As", command=self.on_save_as)
-        export_audio_btn = ttk.Button(file_frame, text="♫ Export Audio", command=self.on_export_audio)
-        search_btn = ttk.Button(file_frame, text="⌕ Find/Replace", command=self.on_search)
-        self.theme_options = [THEME_PRESETS[k]["name"] for k in THEME_PRESETS]
-        self.theme_id_by_name = {THEME_PRESETS[k]["name"]: k for k in THEME_PRESETS}
-        self.theme_name_var = tk.StringVar(value=THEME_PRESETS[self.theme_preset]["name"] if self.theme_preset in THEME_PRESETS else "Twilight")
-        settings_btn = ttk.Button(file_frame, text="⚙ Settings", command=self.on_settings)
+        open_btn = ttk.Button(file_frame, text="Open", image=emoji_icon("📂"), compound=tk.LEFT, command=self.on_open)
+        save_btn = ttk.Button(file_frame, text="Save", image=emoji_icon("💾"), compound=tk.LEFT, command=self.on_save)
+        save_as_btn = ttk.Button(file_frame, text="Save As", image=emoji_icon("💾"), compound=tk.LEFT, command=self.on_save_as)
+        self.export_audio_btn = ttk.Button(file_frame, text="Export Audio", image=emoji_icon("🎵"), compound=tk.LEFT, command=self.on_export_audio)
+        search_btn = ttk.Button(file_frame, text="Find/Replace", image=emoji_icon("🔍"), compound=tk.LEFT, command=self.on_search)
+        settings_btn = ttk.Button(file_frame, text="Settings", image=emoji_icon("⚙️"), compound=tk.LEFT, command=self.on_settings)
         
         open_btn.pack(side="left", padx=(0,6))
         save_btn.pack(side="left", padx=(0,6))
         save_as_btn.pack(side="left", padx=(0,6))
-        export_audio_btn.pack(side="left", padx=(0,6))
+        self.export_audio_btn.pack(side="left", padx=(0,6))
         search_btn.pack(side="left", padx=(0,6))
         settings_btn.pack(side="left", padx=(0,6))
         
@@ -283,8 +542,9 @@ class ReaderApp:
         clipboard_frame.pack(side="right", padx=(6,0))
         
         self.clipboard_var = tk.BooleanVar(value=self.clipboard_monitor_enabled)
-        clipboard_check = ttk.Checkbutton(clipboard_frame, text="📎 Monitor Clipboard:", 
-                                         variable=self.clipboard_var, command=self.toggle_clipboard_monitor)
+        clipboard_check = ttk.Checkbutton(clipboard_frame, text="Monitor Clipboard:", image=emoji_icon("📎"),
+                                         compound=tk.LEFT,
+                                          variable=self.clipboard_var, command=self.toggle_clipboard_monitor)
         clipboard_check.pack(side="left")
         
         # Clipboard action mode (speak or queue) - use loaded setting
@@ -321,33 +581,49 @@ class ReaderApp:
         queue_list_frame.pack(side="left", fill="both", expand=True)
         
         queue_scrollbar = ttk.Scrollbar(queue_list_frame, orient="vertical")
-        self.queue_listbox = tk.Listbox(queue_list_frame, height=4, 
-                                        yscrollcommand=queue_scrollbar.set,
-                                        selectmode=tk.SINGLE)
-        queue_scrollbar.config(command=self.queue_listbox.yview)
+        self.queue_tree = ttk.Treeview(
+            queue_list_frame, height=4, selectmode="browse",
+            columns=("name",), show="tree headings",
+            yscrollcommand=queue_scrollbar.set,
+        )
+        self.queue_tree.heading("#0", text="")
+        self.queue_tree.column("#0", width=24, stretch=False, anchor="center")
+        self.queue_tree.heading("name", text="Speech Queue")
+        self.queue_tree.column("name", stretch=True)
+        queue_scrollbar.config(command=self.queue_tree.yview)
         queue_scrollbar.pack(side="right", fill="y")
-        self.queue_listbox.pack(side="left", fill="both", expand=True)
+        self.queue_tree.pack(side="left", fill="both", expand=True)
+        self.queue_tree.bind("<Delete>", lambda _e: self.remove_from_queue())
+        self.queue_tree.bind("<Double-1>", lambda _e: self.play_queue())
+
+        # Speech-queue playback state
+        self.queue_loop = tk.BooleanVar(value=False)
         
         # Queue control buttons
         queue_controls = ttk.Frame(queue_frame)
         self.queue_controls_frame = queue_controls
         queue_controls.pack(side="right", fill="y", padx=(5,0))
         
-        ttk.Button(queue_controls, text="➕ Add Current Text", 
-                  command=self.add_current_to_queue).pack(pady=2)
-        ttk.Button(queue_controls, text="➕ Add File(s)", 
-                  command=self.add_files_to_queue).pack(pady=2)
-        ttk.Button(queue_controls, text="▶ Play Queue", 
-                  command=self.play_queue).pack(pady=2)
-        ttk.Button(queue_controls, text="− Remove Selected", 
-                  command=self.remove_from_queue).pack(pady=2)
-        ttk.Button(queue_controls, text="⌫ Clear Queue", 
-                  command=self.clear_queue).pack(pady=2)
+        ttk.Button(queue_controls, text="Add Current Text", image=emoji_icon("➕"), compound=tk.LEFT,
+                  command=self.add_current_to_queue).pack(fill="x", pady=2)
+        ttk.Button(queue_controls, text="Add File(s)", image=emoji_icon("📄"), compound=tk.LEFT,
+                  command=self.add_files_to_queue).pack(fill="x", pady=2)
+        ttk.Button(queue_controls, text="Play Queue", image=emoji_icon("▶️"), compound=tk.LEFT, style="Accent.TButton",
+                  command=self.play_queue).pack(fill="x", pady=2)
+        ttk.Button(queue_controls, text="Remove Selected", image=emoji_icon("➖"), compound=tk.LEFT,
+                  command=self.remove_from_queue).pack(fill="x", pady=2)
+        ttk.Button(queue_controls, text="Clear Queue", image=emoji_icon("🗑️"), compound=tk.LEFT,
+                  command=self.clear_queue).pack(fill="x", pady=2)
+        ttk.Button(queue_controls, text="Move Up", image=emoji_icon("⬆️"), compound=tk.LEFT,
+                  command=self.move_queue_up).pack(fill="x", pady=2)
+        ttk.Button(queue_controls, text="Move Down", image=emoji_icon("⬇️"), compound=tk.LEFT,
+                  command=self.move_queue_down).pack(fill="x", pady=2)
+        ttk.Checkbutton(queue_controls, text="Loop queue", variable=self.queue_loop).pack(fill="x", pady=(6, 2))
         
         # STT panel (minimal UI, shown only in STT mode)
         self.stt_frame = ttk.Frame(root)
-        ttk.Label(self.stt_frame, text="STT: faster-whisper").pack(side="left", padx=(0, 8))
-        self.stt_record_btn = ttk.Button(self.stt_frame, text="● Start Recording", command=self.on_stt_record_toggle)
+        ttk.Label(self.stt_frame, text="STT: faster-whisper", style="Section.TLabel").pack(side="left", padx=(0, 8))
+        self.stt_record_btn = ttk.Button(self.stt_frame, text="Start Recording", image=emoji_icon("⏺️"), compound=tk.LEFT, command=self.on_stt_record_toggle)
         self.stt_record_btn.pack(side="left", padx=(0, 8))
         self.stt_status = ttk.Label(self.stt_frame, text="Offline STT ready")
         self.stt_status.pack(side="left")
@@ -367,6 +643,15 @@ class ReaderApp:
         
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
         
+        # Window geometry: restore last size/position, else center on screen.
+        if getattr(self, "window_geometry", ""):
+            try:
+                self.root.geometry(self.window_geometry)
+            except Exception:
+                self._center_window()
+        else:
+            self._center_window()
+
         # Start clipboard monitoring if enabled
         if self.clipboard_monitor_enabled:
             # Prime baseline so current clipboard does not auto-trigger on startup.
@@ -375,6 +660,19 @@ class ReaderApp:
             except Exception:
                 self.last_clipboard = ""
             self.monitor_clipboard()
+
+    def _center_window(self):
+        """Center the window within the screen, preserving its size."""
+        self.root.update_idletasks()
+        w = self.root.winfo_width()
+        h = self.root.winfo_height()
+        if w < 2 or h < 2:
+            w, h = 800, 600
+        sw = self.root.winfo_screenwidth()
+        sh = self.root.winfo_screenheight()
+        x = max(0, (sw - w) // 2)
+        y = max(0, (sh - h) // 2)
+        self.root.geometry(f"{w}x{h}+{x}+{y}")
 
     def load_settings(self):
         """Load settings from JSON file with corruption recovery."""
@@ -428,9 +726,15 @@ class ReaderApp:
         except (TypeError, ValueError):
             self.stt_auto_unload_minutes = DEFAULT_SETTINGS["stt_auto_unload_minutes"]
         self.hotkeys = loaded.get("hotkeys", self.get_default_hotkeys())
+        self.window_geometry = loaded.get("geometry", "")
     
     def save_settings(self):
         """Save settings to JSON file"""
+        # Capture current window geometry so we can restore it next launch.
+        try:
+            self.window_geometry = self.root.geometry()
+        except Exception:
+            pass
         try:
             settings = {
                 'theme_preset': self.theme_preset,
@@ -446,15 +750,52 @@ class ReaderApp:
                 'stt_unload_model_when_idle': self.stt_unload_model_when_idle,
                 'stt_auto_unload_enabled': self.stt_auto_unload_enabled,
                 'stt_auto_unload_minutes': self.stt_auto_unload_minutes,
-                'hotkeys': self.hotkeys
+                'hotkeys': self.hotkeys,
+                'geometry': self.window_geometry
             }
             # Write atomically to avoid partial/corrupt JSON on interruption.
             temp_settings_file = self.settings_file + ".tmp"
             with open(temp_settings_file, 'w', encoding="utf-8") as f:
                 json.dump(settings, f, indent=2)
-            os.replace(temp_settings_file, self.settings_file)
+                f.flush()
+                os.fsync(f.fileno())
+            self._atomic_replace(temp_settings_file, self.settings_file)
         except Exception as e:
             print(f"Failed to save settings: {e}")
+
+    def _atomic_replace(self, src, dst):
+        """Replace dst with src, tolerating Windows lock/read-only issues.
+
+        On Windows, ``os.replace`` fails with WinError 5 when the destination
+        is held open by another process (e.g. an editor) or marked read-only.
+        We clear the read-only bit and retry, then fall back to a non-atomic
+        copy so settings still persist.
+        """
+        try:
+            os.replace(src, dst)
+            return
+        except OSError:
+            pass
+        # Clear read-only attribute and retry the rename.
+        try:
+            os.chmod(dst, 0o666)
+        except OSError:
+            pass
+        try:
+            os.replace(src, dst)
+            return
+        except OSError:
+            pass
+        # Destination may be open (locked): overwrite its contents directly.
+        try:
+            shutil.copyfile(src, dst)
+        except OSError as e:
+            print(f"Failed to save settings (fallback): {e}")
+        finally:
+            try:
+                os.remove(src)
+            except OSError:
+                pass
     
     def get_default_hotkeys(self):
         """Return default hotkey mappings"""
@@ -575,7 +916,7 @@ class ReaderApp:
         self.recording_frame_count = 0
         self._cancel_stt_idle_unload()
         self.recording = True
-        self.stt_record_btn.configure(text="■ Stop Recording")
+        self.stt_record_btn.configure(text="Stop Recording", image=emoji_icon("⏹️"))
         self.stt_status.configure(text="Recording... (faster-whisper)")
 
         selected_input = self.stt_input_device.strip()
@@ -610,7 +951,7 @@ class ReaderApp:
                 os.remove(self.recording_wav_path)
             self.recording_wav_path = None
             self.recording_frame_count = 0
-            self.stt_record_btn.configure(text="● Start Recording")
+            self.stt_record_btn.configure(text="Start Recording", image=emoji_icon("⏺️"))
             self.stt_status.configure(text="STT recording failed")
             messagebox.showerror("STT Error", f"Could not start recording:\n{exc}")
 
@@ -619,7 +960,7 @@ class ReaderApp:
             return
         self.recording = False
         self.stt_processing = True
-        self.stt_record_btn.configure(text="● Start Recording")
+        self.stt_record_btn.configure(text="⏺️ Start Recording")
         self.stt_status.configure(text="Processing transcription...")
         stream = self.recording_stream
         self.recording_stream = None
@@ -717,7 +1058,7 @@ class ReaderApp:
     def _finish_stt_run(self):
         self.recording = False
         self.stt_processing = False
-        self.stt_record_btn.configure(text="● Start Recording")
+        self.stt_record_btn.configure(text="⏺️ Start Recording")
         if self.stt_unload_model_when_idle:
             self._release_stt_model()
         else:
@@ -759,64 +1100,194 @@ class ReaderApp:
         self._release_stt_model()
     
     def apply_theme(self):
-        """Apply selected theme preset."""
-        theme = THEME_PRESETS.get(self.theme_preset, THEME_PRESETS["twilight"])
+        """Apply the selected theme preset as a full ttk design system."""
+        theme = _normalize_theme(THEME_PRESETS.get(self.theme_preset, THEME_PRESETS["twilight"]))
+        self._active_theme = theme
         try:
             self.style.theme_use("clam")
         except tk.TclError:
             pass
 
-        # Apply consistent ttk styling across frames, labels, buttons, and settings tabs.
-        self.style.configure(".", background=theme["bg"], foreground=theme["text"], fieldbackground=theme["bg_elev"])
-        self.style.configure("TFrame", background=theme["bg"])
-        self.style.configure("TLabel", background=theme["bg"], foreground=theme["text"])
-        self.style.configure("TLabelframe", background=theme["bg"], foreground=theme["text"], bordercolor=theme["border"])
-        self.style.configure("TLabelframe.Label", background=theme["bg"], foreground=theme["text"])
-        self.style.configure(
-            "TButton",
-            background=theme["bg_elev"],
-            foreground=theme["text"],
-            bordercolor=theme["border"],
-            padding=(6, 2)
-        )
-        self.style.map(
-            "TButton",
-            background=[
-                ("pressed", theme["bg_elev"]),
-                ("active", theme["accent"])
-            ],
-            foreground=[
-                ("pressed", theme["text"]),
-                ("active", theme["bg"])
-            ]
-        )
-        self.style.configure("TCheckbutton", background=theme["bg"], foreground=theme["text"])
-        self.style.configure("TRadiobutton", background=theme["bg"], foreground=theme["text"])
-        self.style.configure("TCombobox", fieldbackground=theme["bg_elev"], foreground=theme["text"], bordercolor=theme["border"], arrowcolor=theme["text"])
-        self.style.map("TCombobox", fieldbackground=[("readonly", theme["bg_elev"])], foreground=[("readonly", theme["text"])])
-        self.style.configure("Horizontal.TScale", background=theme["bg"], troughcolor=theme["bg_elev"])
-        self.style.configure("TNotebook", background=theme["bg"], borderwidth=0)
-        self.style.configure("TNotebook.Tab", background=theme["bg_elev"], foreground=theme["text"], padding=[10, 4])
-        self.style.map("TNotebook.Tab", background=[("selected", theme["accent"])], foreground=[("selected", theme["bg"])])
+        bg = theme["bg"]
+        bg_elev = theme["bg_elev"]
+        border = theme["border"]
+        text = theme["text"]
+        muted = theme["muted"]
+        accent = theme["accent"]
+        field = theme["field"]
+        field_text = theme["field_text"]
+        field_border = theme["field_border"]
+        button = theme["button"]
+        button_text = theme["button_text"]
+        button_hover = theme["button_hover"]
+        button_active = theme["button_active"]
+        on_accent = theme["on_accent"]
+        disabled = theme["disabled"]
+        disabled_text = theme["disabled_text"]
+        header = theme["header"]
+        header_text = theme["header_text"]
+        header_btn = _lighten(header, 0.10) if _is_dark(header) else _darken(header, 0.07)
 
-        self.root.configure(bg=theme["bg"])
-        self.txt.configure(bg=theme["bg_elev"], fg=theme["text"], insertbackground=theme["text"])
-        self.queue_listbox.configure(
-            bg=theme["bg_elev"],
-            fg=theme["text"],
-            selectbackground=theme["accent"],
-            selectforeground=theme["bg"]
+        s = self.style
+        # ttk styling is guarded so an unexpected platform quirk can't abort theming.
+        try:
+            s.configure(
+                ".",
+                background=bg, foreground=text, fieldbackground=field,
+                bordercolor=border, troughcolor=field, focuscolor=accent,
+                lightcolor=bg_elev, darkcolor=bg
+            )
+            s.configure("TFrame", background=bg)
+            s.configure("TLabel", background=bg, foreground=text)
+            s.configure("Muted.TLabel", background=bg, foreground=muted)
+            s.configure("Section.TLabel", background=bg, foreground=muted,
+                        font=(self.ui_font_family, 9, "bold"))
+            s.configure("Status.TLabel", background=bg_elev, foreground=muted, padding=(8, 3))
+            s.configure("TLabelframe", background=bg, foreground=text,
+                        bordercolor=border, relief="solid", borderwidth=1)
+            s.configure("TLabelframe.Label", background=bg, foreground=accent,
+                        font=(self.ui_font_family, 9, "bold"))
+
+            # Buttons (fake soft rounding via padding + flat relief).
+            s.configure("TButton", background=button, foreground=button_text,
+                        bordercolor=border, relief="flat", borderwidth=1,
+                        padding=(11, 6), anchor="center")
+            s.map(
+                "TButton",
+                background=[("disabled", disabled), ("pressed", button_active), ("active", button_hover)],
+                foreground=[("disabled", disabled_text), ("pressed", on_accent), ("active", button_text)],
+                bordercolor=[("active", accent), ("focus", accent)]
+            )
+
+            # Primary / accent button.
+            s.configure("Accent.TButton", background=accent, foreground=on_accent,
+                        bordercolor=accent, relief="flat", borderwidth=1, padding=(13, 6))
+            s.map(
+                "Accent.TButton",
+                background=[("disabled", disabled), ("pressed", _darken(accent, 0.16)), ("active", _lighten(accent, 0.08))],
+                foreground=[("disabled", disabled_text)],
+                bordercolor=[("active", accent)]
+            )
+
+            # Header widgets (sit on the gradient canvas).
+            s.configure("Header.TFrame", background=header)
+            s.configure("Header.TLabel", background=header, foreground=header_text)
+            s.configure("Header.TButton", background=header_btn, foreground=header_text,
+                        bordercolor=header_btn, focuscolor=header_btn, lightcolor=header_btn,
+                        darkcolor=header_btn, relief="flat", borderwidth=1, padding=(11, 5))
+            s.map(
+                "Header.TButton",
+                background=[("pressed", accent), ("active", _mix(header_btn, accent, 0.5))],
+                foreground=[("pressed", on_accent), ("active", header_text)],
+                bordercolor=[("active", header_btn), ("focus", header_btn), ("pressed", accent)]
+            )
+            s.configure("Header.TCombobox", fieldbackground=header_btn, background=header_btn,
+                        foreground=header_text, arrowcolor=header_text, bordercolor=header_btn,
+                        focuscolor=header_btn, lightcolor=header_btn, darkcolor=header_btn)
+            s.map(
+                "Header.TCombobox",
+                fieldbackground=[("readonly", header_btn)],
+                foreground=[("readonly", header_text)],
+                arrowcolor=[("active", accent)],
+                bordercolor=[("focus", header_btn), ("active", header_btn), ("readonly", header_btn)]
+            )
+
+            s.configure("TCheckbutton", background=bg, foreground=text, focuscolor=accent)
+            s.map(
+                "TCheckbutton",
+                background=[("active", bg)],
+                foreground=[("disabled", disabled_text), ("active", accent)],
+                indicatorcolor=[("selected", accent), ("!selected", field)]
+            )
+            s.configure("TRadiobutton", background=bg, foreground=text, focuscolor=accent)
+            s.map(
+                "TRadiobutton",
+                background=[("active", bg)],
+                foreground=[("disabled", disabled_text), ("active", accent)],
+                indicatorcolor=[("selected", accent), ("!selected", field)]
+            )
+
+            s.configure("TEntry", fieldbackground=field, foreground=field_text,
+                        bordercolor=field_border, insertcolor=field_text,
+                        borderwidth=1, padding=4)
+            s.map("TEntry", bordercolor=[("focus", accent)], lightcolor=[("focus", accent)])
+
+            s.configure("TSpinbox", fieldbackground=field, foreground=field_text,
+                        bordercolor=field_border, arrowcolor=text, borderwidth=1, padding=3)
+            s.map("TSpinbox", bordercolor=[("focus", accent)])
+
+            s.configure("TCombobox", fieldbackground=field, background=field, foreground=field_text,
+                        bordercolor=field_border, arrowcolor=text, borderwidth=1, padding=3)
+            s.map(
+                "TCombobox",
+                fieldbackground=[("readonly", field)],
+                foreground=[("readonly", field_text)],
+                bordercolor=[("focus", accent)],
+                arrowcolor=[("active", accent)]
+            )
+
+            s.configure("Horizontal.TScale", background=bg, troughcolor=field, borderwidth=0)
+            s.map("Horizontal.TScale", background=[("active", bg)])
+
+            for orient in ("Vertical.TScrollbar", "Horizontal.TScrollbar"):
+                s.configure(orient, background=bg_elev, troughcolor=bg,
+                            bordercolor=bg, arrowcolor=muted, borderwidth=0)
+                s.map(orient, background=[("active", accent), ("pressed", accent)])
+
+            s.configure("TNotebook", background=bg, borderwidth=0)
+            s.configure("TNotebook.Tab", background=bg_elev, foreground=muted,
+                        padding=[14, 6], borderwidth=0)
+            s.map(
+                "TNotebook.Tab",
+                background=[("selected", accent), ("active", button_hover)],
+                foreground=[("selected", on_accent), ("active", text)]
+            )
+        except tk.TclError:
+            pass
+
+        # tk (non-ttk) widgets and root.
+        self.root.configure(bg=bg)
+        self.txt.configure(
+            bg=field, fg=field_text, insertbackground=field_text,
+            selectbackground=accent, selectforeground=on_accent,
+            relief="flat", borderwidth=0, padx=8, pady=6,
+            highlightthickness=1, highlightbackground=border, highlightcolor=accent
         )
-        self.txt.tag_config(self.highlight_tag, background=theme["accent"], foreground=theme["bg"])
+        try:
+            self.style.configure("Queue.Treeview", background=field, foreground=field_text,
+                                 fieldbackground=field, borderwidth=0, relief="flat", rowheight=22)
+            self.style.map("Queue.Treeview",
+                           background=[("selected", accent)],
+                           foreground=[("selected", on_accent)])
+            self.queue_tree.configure(style="Queue.Treeview")
+        except tk.TclError:
+            pass
+        try:
+            self.queue_tree.tag_configure("now_playing", background=accent, foreground=on_accent)
+        except tk.TclError:
+            pass
+        self.txt.tag_config(self.highlight_tag, background=accent, foreground=on_accent)
+
+        if hasattr(self, "status_bar"):
+            try:
+                self.status_bar.configure(style="Status.TLabel")
+            except tk.TclError:
+                pass
+
+        if hasattr(self, "header"):
+            self.header.apply_colors(
+                header, theme["header2"], header_text,
+                _mix(header_text, header, 0.35)
+            )
 
         # Tk-level options for menus/dialog text so theme shifts feel complete.
-        self.root.option_add("*Text.background", theme["bg_elev"])
-        self.root.option_add("*Text.foreground", theme["text"])
-        self.root.option_add("*Text.insertBackground", theme["text"])
-        self.root.option_add("*Menu.background", theme["bg_elev"])
-        self.root.option_add("*Menu.foreground", theme["text"])
-        self.root.option_add("*Menu.activeBackground", theme["accent"])
-        self.root.option_add("*Menu.activeForeground", theme["bg"])
+        self.root.option_add("*Text.background", field)
+        self.root.option_add("*Text.foreground", field_text)
+        self.root.option_add("*Text.insertBackground", field_text)
+        self.root.option_add("*Menu.background", bg_elev)
+        self.root.option_add("*Menu.foreground", text)
+        self.root.option_add("*Menu.activeBackground", accent)
+        self.root.option_add("*Menu.activeForeground", on_accent)
 
     def on_theme_selected(self, _=None):
         picked = self.theme_name_var.get()
@@ -877,7 +1348,7 @@ class ReaderApp:
                         elif self.clipboard_auto_queue and not self.global_stop_requested:
                             # Currently speaking but auto-queue is enabled - add to queue
                             preview = current_clipboard[:50] + "..." if len(current_clipboard) > 50 else current_clipboard
-                            self.speech_queue.append({'text': current_clipboard, 'name': f"📋 Auto-Queued: {preview}"})
+                            self.speech_queue.append({'text': current_clipboard, 'name': f"Auto-Queued: {preview}", 'icon': '📋'})
                             self.update_queue_display()
                             self.status_var.set(f"Auto-queued clipboard content ({len(self.speech_queue)} items)")
                             
@@ -891,7 +1362,7 @@ class ReaderApp:
                     elif action == "queue":
                         # Queue mode - add to speech queue
                         preview = current_clipboard[:50] + "..." if len(current_clipboard) > 50 else current_clipboard
-                        self.speech_queue.append({'text': current_clipboard, 'name': f"📋 Clipboard: {preview}"})
+                        self.speech_queue.append({'text': current_clipboard, 'name': f"Clipboard: {preview}", 'icon': '📋'})
                         self.update_queue_display()
                         self.status_var.set(f"Clipboard added to queue ({len(self.speech_queue)} items)")
         except (tk.TclError, UnicodeDecodeError):
@@ -914,7 +1385,7 @@ class ReaderApp:
         
         # Add to queue with a preview (first 50 chars)
         preview = text[:50] + "..." if len(text) > 50 else text
-        self.speech_queue.append({'text': text, 'name': f"Text: {preview}"})
+        self.speech_queue.append({'text': text, 'name': f"Text: {preview}", 'icon': '💬'})
         self.update_queue_display()
         self.status_var.set(f"Added to queue ({len(self.speech_queue)} items)")
     
@@ -928,26 +1399,61 @@ class ReaderApp:
         if file_paths:
             for file_path in file_paths:
                 try:
-                    with open(file_path, 'r', encoding='utf-8') as file:
-                        content = file.read().strip()
-                        if content:
-                            filename = os.path.basename(file_path)
-                            self.speech_queue.append({'text': content, 'name': f"📄 {filename}"})
+                    content = self._read_text_file(file_path).strip()
+                    if content:
+                        filename = os.path.basename(file_path)
+                        self.speech_queue.append({'text': content, 'name': filename, 'icon': '📄'})
                 except Exception as e:
                     messagebox.showerror("Error", f"Failed to load {file_path}: {str(e)}")
             
             self.update_queue_display()
             self.status_var.set(f"Added {len(file_paths)} file(s) to queue ({len(self.speech_queue)} items)")
     
+    def move_queue_up(self):
+        """Move the selected queue item up one position."""
+        selection = self.queue_tree.selection()
+        if not selection:
+            messagebox.showinfo("Queue", "Please select an item to move.")
+            return
+        index = int(selection[0])
+        if index <= 0:
+            return
+        self.speech_queue[index - 1], self.speech_queue[index] = \
+            self.speech_queue[index], self.speech_queue[index - 1]
+        if self.current_queue_index in (index, index - 1):
+            self.current_queue_index = index - 1 if self.current_queue_index == index else index
+        self.update_queue_display()
+        self.queue_tree.selection_set(str(index - 1))
+    
+    def move_queue_down(self):
+        """Move the selected queue item down one position."""
+        selection = self.queue_tree.selection()
+        if not selection:
+            messagebox.showinfo("Queue", "Please select an item to move.")
+            return
+        index = int(selection[0])
+        if index >= len(self.speech_queue) - 1:
+            return
+        self.speech_queue[index + 1], self.speech_queue[index] = \
+            self.speech_queue[index], self.speech_queue[index + 1]
+        if self.current_queue_index in (index, index + 1):
+            self.current_queue_index = index + 1 if self.current_queue_index == index else index
+        self.update_queue_display()
+        self.queue_tree.selection_set(str(index + 1))
+    
     def remove_from_queue(self):
         """Remove selected item from queue"""
-        selection = self.queue_listbox.curselection()
+        selection = self.queue_tree.selection()
         if not selection:
             messagebox.showinfo("Queue", "Please select an item to remove.")
             return
         
-        index = selection[0]
+        index = int(selection[0])
         del self.speech_queue[index]
+        if self.current_queue_index == index:
+            self.current_queue_index = -1
+        elif self.current_queue_index > index:
+            self.current_queue_index -= 1
         self.update_queue_display()
         self.status_var.set(f"Removed from queue ({len(self.speech_queue)} items)")
     
@@ -958,19 +1464,22 @@ class ReaderApp:
         
         if messagebox.askyesno("Clear Queue", f"Remove all {len(self.speech_queue)} items from queue?"):
             self.speech_queue.clear()
+            self.current_queue_index = -1
             self.update_queue_display()
             self.status_var.set("Queue cleared")
     
     def update_queue_display(self):
-        """Update the queue listbox display"""
-        self.queue_listbox.delete(0, tk.END)
+        """Update the speech-queue Treeview display."""
+        for child in self.queue_tree.get_children():
+            self.queue_tree.delete(child)
         for i, item in enumerate(self.speech_queue):
-            prefix = "▶ " if i == self.current_queue_index and self.queue_playing else "   "
-            self.queue_listbox.insert(tk.END, f"{prefix}{i+1}. {item['name']}")
-        
-        # Highlight current item if playing
-        if self.queue_playing and 0 <= self.current_queue_index < len(self.speech_queue):
-            self.queue_listbox.itemconfig(self.current_queue_index, bg='lightblue')
+            icon = item.get("icon", "💬")
+            playing = self.queue_playing and i == self.current_queue_index
+            tags = ("now_playing",) if playing else ()
+            self.queue_tree.insert(
+                "", tk.END, iid=str(i),
+                text="", image=emoji_icon(icon), values=(item['name'],), tags=tags
+            )
     
     def play_queue(self):
         """Start playing items in the queue"""
@@ -1070,9 +1579,13 @@ class ReaderApp:
 
             self.root.after(0, _queue_playback_finished_ui)
             
+            # Loop the queue if enabled and playback finished naturally.
+            if (self.queue_loop.get() and not stopped
+                    and self.speech_queue and not self.global_stop_requested):
+                self.root.after(300, self._start_auto_queue)
             # If there are more queued items and auto-queue is enabled, continue playing
             # Only continue if there are items beyond what we just played
-            if self.current_queue_index < len(self.speech_queue) and self.clipboard_auto_queue and not self.stop_requested and not self.global_stop_requested:
+            elif self.current_queue_index < len(self.speech_queue) and self.clipboard_auto_queue and not self.stop_requested and not self.global_stop_requested:
                 self.root.after(100, lambda: self._start_auto_queue())
             
         except Exception as e:
@@ -1181,6 +1694,17 @@ class ReaderApp:
         self.txt.delete("1.0", "end")
         self.status_var.set("Text cleared")
     
+    def _read_text_file(self, path):
+        """Read a text file tolerantly (BOM / UTF-8 / cp1252 / fallback)."""
+        with open(path, "rb") as f:
+            raw = f.read()
+        for enc in ("utf-8-sig", "utf-8", "cp1252"):
+            try:
+                return raw.decode(enc)
+            except UnicodeDecodeError:
+                continue
+        return raw.decode("utf-8", errors="replace")
+
     def on_open(self):
         file_path = filedialog.askopenfilename(
             title="Open Text File",
@@ -1188,14 +1712,13 @@ class ReaderApp:
         )
         if file_path:
             try:
-                with open(file_path, 'r', encoding='utf-8') as file:
-                    content = file.read()
+                content = self._read_text_file(file_path)
                 self.txt.delete("1.0", "end")
                 self.txt.insert("1.0", content)
                 self.current_file = file_path
                 self.status_var.set(f"Opened: {os.path.basename(file_path)}")
             except Exception as e:
-                messagebox.showerror("Error", f"Failed to open file: {str(e)}")
+                messagebox.showerror("Open Failed", f"Could not read this file:\n{str(e)}")
     
     def on_save(self):
         if self.current_file:
@@ -1204,7 +1727,7 @@ class ReaderApp:
                     file.write(self.txt.get("1.0", "end"))
                 self.status_var.set(f"Saved: {os.path.basename(self.current_file)}")
             except Exception as e:
-                messagebox.showerror("Error", f"Failed to save file: {str(e)}")
+                messagebox.showerror("Save Failed", f"Could not save this file:\n{str(e)}")
         else:
             self.on_save_as()
     
@@ -1221,10 +1744,10 @@ class ReaderApp:
                 self.current_file = file_path
                 self.status_var.set(f"Saved: {os.path.basename(file_path)}")
             except Exception as e:
-                messagebox.showerror("Error", f"Failed to save file: {str(e)}")
+                messagebox.showerror("Save Failed", f"Could not save this file:\n{str(e)}")
     
     def on_export_audio(self):
-        """Export text to audio file"""
+        """Export text to audio file (runs in a background thread)."""
         text = self.txt.get("1.0", "end").strip()
         if not text:
             messagebox.showinfo("Export Audio", "No text to export.")
@@ -1237,26 +1760,43 @@ class ReaderApp:
         )
         
         if file_path:
-            try:
-                self.status_var.set("Exporting audio...")
-                engine = pyttsx3.init()
-                engine.setProperty("rate", self.rate.get())
-                engine.setProperty("volume", self.vol.get())
-                if self.selected_voice:
-                    engine.setProperty("voice", self.selected_voice)
-                
-                engine.save_to_file(text, file_path)
-                engine.runAndWait()
-                
+            self.export_audio_btn.state(["disabled"])
+            self.status_var.set("Exporting audio...")
+            threading.Thread(
+                target=self._export_audio_worker, args=(text, file_path), daemon=True
+            ).start()
+    
+    def _export_audio_worker(self, text, file_path):
+        """Background worker for audio export (keeps the UI responsive)."""
+        com_initialized = _com_init_thread()
+        error = None
+        try:
+            engine = pyttsx3.init()
+            engine.setProperty("rate", self.rate.get())
+            engine.setProperty("volume", self.vol.get())
+            if self.selected_voice:
+                engine.setProperty("voice", self.selected_voice)
+            engine.save_to_file(text, file_path)
+            engine.runAndWait()
+        except Exception as e:
+            error = str(e)
+        finally:
+            _com_deinit_thread(com_initialized)
+        
+        def _done():
+            self.export_audio_btn.state(["!disabled"])
+            if error:
+                messagebox.showerror("Export Error", f"Failed to export audio: {error}")
+                self.status_var.set("Export failed")
+            else:
                 self.status_var.set(f"Audio exported: {os.path.basename(file_path)}")
                 messagebox.showinfo("Export Audio", f"Audio successfully exported to:\n{file_path}")
-            except Exception as e:
-                messagebox.showerror("Export Error", f"Failed to export audio: {str(e)}")
-                self.status_var.set("Export failed")
+        
+        self.root.after(0, _done)
     
     def on_search(self):
         """Open search and replace dialog"""
-        SearchDialog(self.root, self.txt)
+        SearchDialog(self.root, self.txt, theme=getattr(self, "_active_theme", None))
     
     def on_settings(self, initial_tab="hotkeys"):
         """Open settings dialog."""
@@ -1460,13 +2000,25 @@ class ReaderApp:
 
 class SearchDialog:
     """Search and Replace dialog"""
-    def __init__(self, parent, text_widget):
+    def __init__(self, parent, text_widget, theme=None):
         self.text_widget = text_widget
         self.dialog = tk.Toplevel(parent)
         self.dialog.title("Find and Replace")
-        self.dialog.geometry("450x200")
+        self.dialog.geometry("450x250")
         self.dialog.resizable(False, False)
-        
+        theme = _normalize_theme(theme or THEME_PRESETS["twilight"])
+        self.dialog.configure(bg=theme["bg"])
+
+        header = GradientHeader(
+            self.dialog, title="Find & Replace",
+            subtitle="Search, replace, regex", height=48
+        )
+        header.pack(fill="x", side="top")
+        header.apply_colors(
+            theme["header"], theme["header2"], theme["header_text"],
+            _mix(theme["header_text"], theme["header"], 0.35)
+        )
+
         # Search frame
         search_frame = ttk.Frame(self.dialog, padding=10)
         search_frame.pack(fill="x")
@@ -1577,12 +2129,22 @@ class SettingsDialog:
         self.app = app
         self.dialog = tk.Toplevel(parent)
         self.dialog.title("Settings")
-        self.dialog.geometry("520x440")
+        self.dialog.geometry("520x500")
         self.dialog.resizable(False, False)
         self.dialog.transient(parent)
         self.dialog.grab_set()
-        theme = THEME_PRESETS.get(self.app.theme_preset, THEME_PRESETS["twilight"])
+        theme = _normalize_theme(THEME_PRESETS.get(self.app.theme_preset, THEME_PRESETS["twilight"]))
         self.dialog.configure(bg=theme["bg"])
+
+        header = GradientHeader(
+            self.dialog, title="Settings",
+            subtitle="", height=48
+        )
+        header.pack(fill="x", side="top")
+        header.apply_colors(
+            theme["header"], theme["header2"], theme["header_text"],
+            _mix(theme["header_text"], theme["header"], 0.35)
+        )
 
         notebook = ttk.Notebook(self.dialog)
         notebook.pack(fill="both", expand=True, padx=10, pady=10)
@@ -1668,7 +2230,7 @@ class SettingsDialog:
         ttk.Label(
             theme_frame,
             text="Performance mode lowers update frequency for older machines.",
-            foreground="#666666"
+            style="Muted.TLabel"
         ).grid(row=2, column=0, columnspan=2, sticky="w", pady=(8, 0))
         theme_frame.columnconfigure(1, weight=1)
 
@@ -1720,7 +2282,7 @@ class SettingsDialog:
         ttk.Label(
             audio_frame,
             text="TTS output follows Windows default playback device for pyttsx3.",
-            foreground="#666666"
+            style="Muted.TLabel"
         ).grid(row=2, column=0, columnspan=2, sticky="w")
         self.stt_unload_var = tk.BooleanVar(value=self.app.stt_unload_model_when_idle)
         ttk.Checkbutton(
@@ -1847,11 +2409,19 @@ class SettingsDialog:
         self.stt_auto_unload_minutes_var.set(self.app.stt_auto_unload_minutes)
     
     def reset_defaults(self):
-        """Reset to default hotkeys"""
+        """Reset all settings (hotkeys, theme, performance, audio) to defaults."""
         defaults = self.app.get_default_hotkeys()
         for action, entry in self.hotkey_entries.items():
             entry.delete(0, "end")
             entry.insert(0, defaults.get(action, ''))
+
+        self.theme_var.set(THEME_PRESETS[DEFAULT_SETTINGS["theme_preset"]]["name"])
+        self.performance_var.set(DEFAULT_SETTINGS["performance_mode"])
+        self.input_var.set("System default")
+        self.output_var.set("System default")
+        self.stt_unload_var.set(DEFAULT_SETTINGS["stt_unload_model_when_idle"])
+        self.stt_auto_unload_enabled_var.set(DEFAULT_SETTINGS["stt_auto_unload_enabled"])
+        self.stt_auto_unload_minutes_var.set(DEFAULT_SETTINGS["stt_auto_unload_minutes"])
 
 
 if __name__ == "__main__":

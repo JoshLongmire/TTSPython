@@ -1,10 +1,10 @@
 {
-  "theme_preset": "newvegas",
+  "theme_preset": "graphite",
   "clipboard_monitor": false,
   "clipboard_auto_queue": false,
   "clipboard_action": "queue",
   "performance_mode": false,
-  "mode": "stt",
+  "mode": "tts",
   "stt_engine": "faster-whisper",
   "stt_whisper_model": "small",
   "stt_input_device": "",
@@ -23,5 +23,6 @@
     "clear": "<Control-l>",
     "find": "<Control-f>",
     "export": "<Control-e>"
-  }
+  },
+  "geometry": "1433x849+243+115"
 }

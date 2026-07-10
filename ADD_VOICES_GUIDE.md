@@ -35,25 +35,7 @@ The new voices will appear in the Voice dropdown automatically!
 
 ---
 
-### Method 2: Microsoft Azure Voices (Premium Quality)
-
-Microsoft offers **high-quality neural voices** through Azure:
-
-**Features:**
-- 400+ voices in 140+ languages
-- Natural, human-like speech
-- Different speaking styles (newscast, cheerful, etc.)
-
-**Setup:**
-1. Sign up for Azure (free tier available)
-2. Get Speech Service API key
-3. Modify app to use Azure TTS instead of local SAPI5
-
-*Note: This requires code changes and internet connection*
-
----
-
-### Method 3: Third-Party SAPI5 Voices
+### Method 2: Third-Party SAPI5 Voices
 
 **Free Options:**
 1. **eSpeak** - Open source, many languages
@@ -82,9 +64,14 @@ Microsoft offers **high-quality neural voices** through Azure:
 
 ---
 
-## 🔄 How to Refresh Voice List (Without Restarting)
+## 🔄 How to Refresh the Voice List (Without Restarting)
 
-Let me add a "Refresh Voices" button to your app!
+The app already has built-in voice controls next to the Voice dropdown:
+
+- **Refresh button (🔄)**: Re-scans your system for installed SAPI5 voices and updates the dropdown immediately — no restart needed.
+- **"🎙️ Voices" button**: Opens Windows Speech settings (`ms-settings:speech`) so you can install new voices, then click **Refresh** to pick them up.
+
+So the workflow is: install a voice in Windows → click the **🎙️ Voices** button (or open Speech settings yourself) → click **Refresh** → select the new voice from the dropdown.
 
 ---
 
@@ -154,8 +141,8 @@ for i, voice in enumerate(voices, 1):
 4. Choose a language (e.g., English (United Kingdom))
 5. Download the language pack
 6. Go to: **Time & Language** → **Speech**
-7. The new voices appear!
-8. Restart your TTS app
+7. The new voices appear in Windows!
+8. In the app, click **🎙️ Voices** (or open Speech settings), then click **Refresh**
 9. New voices are in the dropdown! 🎉
 
 ---
@@ -163,7 +150,7 @@ for i, voice in enumerate(voices, 1):
 ## ❓ Troubleshooting
 
 **Problem**: New voice doesn't appear in app
-- **Solution**: Restart the TTS application completely
+- **Solution**: Click the **Refresh** button next to the Voice dropdown. If it still doesn't appear, fully restart the app.
 
 **Problem**: Voice sounds robotic
 - **Solution**: Try premium voices or neural voices from Azure
@@ -180,9 +167,10 @@ for i, voice in enumerate(voices, 1):
 ## 🚀 Next Steps
 
 1. **Add 2-3 free Windows voices** (5 minutes)
-2. **Try your TTS app with new voices** 
-3. **If you love it, consider premium voices**
-4. **I can add a "Refresh Voices" button** - Let me know!
+2. **Click the "🎙️ Voices" button** in the app to open Windows Speech settings (or open it yourself)
+3. **Install the voices**, then click **Refresh** in the app
+4. **Try your TTS app with new voices** 
+5. **If you love it, consider premium voices**
 
 ---
 

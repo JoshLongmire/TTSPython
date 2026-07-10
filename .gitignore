@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.eggs/
+build/
+dist/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# App-local runtime state
+tts_settings.json
+tts_settings.broken.*.json
+tts_settings.json.tmp
+
+# Exported audio (runtime output, not source)
+*.wav
+*.mp3
+
+# Windows shortcut (binary)
+TTSPython.lnk
+
+# Logs
+*.log
+
+# OS / editor junk
+Thumbs.db
+Desktop.ini
+ehthumbs.db
+$DNEXT/
+.idea/
+.vscode/
+
+# Kilo planning notes (ephemeral)
+.kilo/plans/

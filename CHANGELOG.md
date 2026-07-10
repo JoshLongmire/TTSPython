@@ -1,5 +1,49 @@
 # Changelog - TTSPython
 
+## Version 4.0.0 - 2026-07-10
+- Complete graphical UI overhaul (visual-only, no behavior change)
+  - Redesigned all 11 theme presets into cohesive modern palettes + consistent component styling
+  - New gradient header bar with app title and mode toggle
+  - Refined ttk styling: padded/rounded buttons, themed sliders, comboboxes, check/radio, notebook,
+    scrollbars, hover/active/focus states
+  - Themed Search and Settings dialogs with matching headers
+  - Queue "now playing" highlight now uses the theme accent
+- Color emoji rendering (fixes the gray outline glyphs on Windows)
+  - Added `emoji_icon()` helper that renders emoji to color bitmaps via Pillow (`ImageDraw` with
+    `embedded_color=True`) using Segoe UI Emoji, with graceful `None` fallback to text-only when
+    Pillow or a color font is unavailable.
+  - Every toolbar, file, queue, and STT button now shows a color icon next to its text label
+    (`image=` + `compound=tk.LEFT`).
+- Speech Queue reworked to a `ttk.Treeview`
+  - Replaced the plain `Listbox` with a Treeview that shows a per-row color icon (💬 text / 📄 file /
+    📋 clipboard) and a "Speech Queue" heading.
+  - "Now playing" row is highlighted using the theme accent via a `now_playing` tag.
+  - Added **Move Up** / **Move Down** buttons and a **Loop queue** checkbox; the **Delete** key
+    removes the selected item.
+- Export Audio no longer freezes the UI
+  - `on_export_audio` now runs `engine.save_to_file` + `runAndWait` on a daemon worker thread; the
+    Export button disables during export and re-enables on completion.
+- Header simplified
+  - Top-left now reads only `TTSPython 4.0.0` (removed the `· Text-to-Speech & Speech-to-Text` subtitle).
+  - Removed the quick theme switcher from the header; theming is now set via **Settings → Theme**.
+- File I/O encoding robustness
+  - New `_read_text_file()` decodes with `utf-8-sig` → `utf-8` → `cp1252` → lossy fallback, so BOM and
+    legacy encodings no longer crash Open/Add File(s); errors show friendly messages.
+- Settings → Reset to Defaults now resets everything
+  - In addition to hotkeys, it now resets theme preset, Performance Mode, and STT/audio device +
+    unload settings to `DEFAULT_SETTINGS`.
+- Window launch UX
+  - Window is centered on first launch and restores its last size/position (persisted in
+    `tts_settings.json` under `geometry`).
+- Documentation + repo cleanup
+  - Rewrote README to reflect actual v4.0.0 features and Windows/SAPI5 scope
+  - Removed duplicate `docs/` folder and stale Cursor-generated docs (API v2.2, RELEASE_NOTES, etc.)
+  - Refreshed FEATURE_GUIDE, QUICK_REFERENCE, ADD_VOICES_GUIDE; added .gitignore
+  - `dependencies.bat` now also verifies `Pillow` (emoji rendering depends on it; text-only fallback
+    still applies if missing)
+- Bumped app version to 4.0.0
+---
+
 ## Version 3.1.0 - April 23, 2026
 - Performance update (same STT model quality defaults)
   - STT recording now streams directly to a temporary WAV file instead of buffering full chunks in memory, and no longer uses a full `numpy.concatenate` recording path before transcription.
@@ -126,11 +170,6 @@
    - Updated Pro Tips with clipboard queue strategies
    - Enhanced feature descriptions
 
-4. **PYTHON_313_FIX.md**
-   - Updated with COM initialization solution
-   - Explained the root cause (Windows SAPI5 + threading)
-   - Provided code examples
-
 ---
 
 ## Version 2.0 - October 2, 2025
@@ -198,11 +237,13 @@
 
 ## Statistics
 
-- **Total Lines of Code**: 950+
-- **Total Features**: 15+
+- **Total Lines of Code**: 1900+
+- **Total Features**: 20+
 - **Hotkeys**: 10 customizable
-- **Themes**: 2 (Light + Dark)
+- **Themes**: 11 presets (Dark, Twilight, Light, High Contrast, Forest, New Vegas, Spiral, Poly, Sunset, Paper, Graphite)
+- **Modes**: TTS (SAPI5) + STT (offline faster-whisper)
 - **Queue Modes**: File, Text, Clipboard
+- **Platform**: Windows (SAPI5)
 - **Python Compatibility**: 3.8 - 3.13
 
 ---
@@ -223,7 +264,8 @@ Potential future enhancements:
 **Thank you for using TTS Application!** 🎉
 
 For questions or suggestions, check the documentation:
+- `README.md` - Overview and setup
 - `FEATURE_GUIDE.md` - Complete feature documentation
 - `QUICK_REFERENCE.md` - Quick lookup guide
-- `PYTHON_313_FIX.md` - Technical details on threading fix
+- `ADD_VOICES_GUIDE.md` - Installing more SAPI5 voices
 

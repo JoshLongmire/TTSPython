@@ -21,6 +21,7 @@ call :CheckPackage pywin32
 call :CheckPackage numpy
 call :CheckPackage sounddevice
 call :CheckPackage faster-whisper
+call :CheckPackage Pillow
 
 echo =========================================
 echo Complete.
