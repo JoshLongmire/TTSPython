@@ -1,26 +1,26 @@
 # TTSPython
 
-A Windows text-to-speech (TTS) and speech-to-text (STT) desktop application built with Python and tkinter, using the Windows SAPI5 speech engine.
+A text-to-speech (TTS) and speech-to-text (STT) desktop application built with Python and tkinter. On Windows it uses SAPI5; on Linux (including Arch) it uses espeak-ng via `pyttsx3`.
 
 ![TTSPython main window](assets/screenshots/main-ss.png)
 
 ![Python](https://img.shields.io/badge/python-3.8%E2%80%933.13-blue.svg)
-![Platform](https://img.shields.io/badge/platform-Windows-lightgrey.svg)
+![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-lightgrey.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
-![Version](https://img.shields.io/badge/version-4.0.0-brightgreen.svg)
+![Version](https://img.shields.io/badge/version-4.1.0-brightgreen.svg)
 
 ## Description
 
-TTSPython is a Windows-first desktop tool that turns text into spoken audio via the system SAPI5 voices and transcribes speech to text entirely offline. It is built around `pyttsx3` for TTS, with Windows COM (`pythoncom`/pywin32) used for stable threaded speech, and Windows-specific integrations such as opening the `ms-settings:speech` and `ms-settings:sound` panels. It is a Windows application and is not cross-platform; it does not support macOS or Linux.
+TTSPython turns text into spoken audio and transcribes speech to text entirely offline. It is built around `pyttsx3` for TTS: **Windows** uses SAPI5 (with COM/`pywin32` for stable threaded speech), and **Linux** uses **espeak-ng**. STT uses `faster-whisper` on both platforms.
 
 ## Features
 
 ### Text-to-Speech
 - **Speak All** / **Speak Selected** / **Stop** controls for reading text or a selection.
 - Adjustable **Rate** and **Volume** sliders.
-- **Voice selector** populated from the installed SAPI5 voices.
+- **Voice selector** populated from system voices (SAPI5 on Windows; espeak-ng on Linux).
 - **Refresh** button to detect newly installed voices without restarting.
-- **Voices** button that opens the Windows Speech settings panel (`ms-settings:speech`) to install more voices.
+- **Voices** button opens OS speech settings on Windows, or shows espeak-ng install guidance on Linux.
 
 ### Speech-to-Text
 - Offline transcription via `faster-whisper` (CPU, `int8` quantization).
@@ -59,49 +59,59 @@ TTSPython is a Windows-first desktop tool that turns text into spoken audio via 
 - **Reset to Defaults** (Hotkeys tab) resets hotkeys **and** theme preset, Performance Mode, and STT/audio device + unload settings to their defaults.
 - Settings persist to `tts_settings.json` in the script directory (the window size/position is also saved).
 
+### v4.1.0 Linux / Arch Support
+- Runs on **Windows** and **Linux** (tested with Arch Linux packaging: `espeak-ng`, `alsa-utils`, `tk`, `portaudio`).
+- Linux TTS via espeak-ng; install helpers: `dependencies.sh` + `requirements.txt`.
+
 ### v4.0.0 UI Overhaul
-- New **gradient header bar** with the title (`TTSPython 4.0.0`), version, and mode toggle.
+- New **gradient header bar** with the title (`TTSPython`), version, and mode toggle.
 - Cohesive modern palettes for all 11 themes.
 - Refined `ttk` styling: padded buttons, themed sliders/comboboxes/check/radio/notebook/scrollbars, and hover/active/focus states.
 - **Color emoji icons** on all buttons (rendered to bitmaps via Pillow so they are not gray outline glyphs on Windows).
 - Themed Search (Find & Replace) and Settings dialogs.
 
 ## Requirements
-- Windows (SAPI5 is required for TTS).
+- **Windows 10/11** (SAPI5) or **Linux** with espeak-ng (Arch and other distros).
 - Python 3.8–3.13.
 - `Pillow` — renders the color emoji icons (text-only fallback if missing).
-- For TTS: `pyttsx3` and `pywin32` (Windows COM support).
+- For TTS: `pyttsx3` (+ `pywin32` on Windows only).
 - For STT: `faster-whisper` and `sounddevice` (offline transcription, microphone input).
+- On Linux: system packages `espeak-ng`, `alsa-utils` (aplay), `tk`, and `portaudio` (STT mic).
 
 ## Installation
 
-### Prerequisites
-- **Windows 10 or 11** — SAPI5 (the speech engine) is built into Windows.
-- **Python 3.8–3.13** — get it from [python.org](https://www.python.org/downloads/windows/).
-  During setup, tick **"Add Python to PATH"** so you can run `python` from any folder.
-
-### Steps
-1. **Get the code** — clone the repository, or download the ZIP and extract it. Then open a terminal in the `TTSPython` folder:
+### Windows
+1. **Prerequisites** — Windows 10/11 with SAPI5; Python 3.8–3.13 from [python.org](https://www.python.org/downloads/windows/) (tick **Add Python to PATH**).
+2. Clone or extract the repo, then open a terminal in the `TTSPython` folder:
    ```powershell
-   git clone https://github.com/yourusername/TTSPython.git
+   git clone https://github.com/JoshLongmire/TTSPython.git
    cd TTSPython
-   ```
-2. **Install dependencies** — this runs `dependencies.bat`, which installs only the missing packages (it never upgrades Python or pip):
-   ```powershell
    ./dependencies.bat
-   ```
-3. **Run the app**:
-   ```powershell
    python TTSPython.py
    ```
-   The window opens centered on your screen. Your settings (theme, hotkeys, window size) are saved automatically for next time.
 
 > **First run tip:** If you see a Windows Defender / SmartScreen warning, choose **"More info" → "Run anyway"** — the script is a plain Python file, not a signed installer.
+
+### Linux (Arch and others)
+1. **System packages** (Arch example):
+   ```bash
+   sudo pacman -S espeak-ng alsa-utils tk portaudio python
+   ```
+2. Clone the repo and install Python deps:
+   ```bash
+   git clone https://github.com/JoshLongmire/TTSPython.git
+   cd TTSPython
+   chmod +x dependencies.sh
+   ./dependencies.sh
+   source .venv/bin/activate
+   python TTSPython.py
+   ```
+   `dependencies.sh` creates a `.venv` and installs from `requirements.txt` (via `uv` if available, otherwise `pip`).
 
 ## Usage
 
 ### Running
-```powershell
+```bash
 python TTSPython.py
 ```
 
@@ -133,10 +143,10 @@ python TTSPython.py
 4. Use **Settings → Audio** to pick the STT input device and configure model unload behavior.
 
 ### Adding Voices
-- Click **Voices** in the app to open Windows Speech settings, or open `ms-settings:speech` directly.
-- Install additional voices, then click **Refresh** to detect them.
-- See [`ADD_VOICES_GUIDE.md`](ADD_VOICES_GUIDE.md) for details.
-- Run `python check_voices.py` to list installed SAPI5 voices.
+- **Windows:** Click **Voices** to open Speech settings (`ms-settings:speech`), install voices, then **Refresh**.
+- **Linux:** Install espeak-ng language data via your package manager (Arch: `sudo pacman -S espeak-ng`), then **Refresh**.
+- See [`ADD_VOICES_GUIDE.md`](ADD_VOICES_GUIDE.md) for Windows SAPI5 details.
+- Run `python check_voices.py` to list installed voices.
 
 ## Default Hotkeys
 
@@ -172,9 +182,8 @@ Settings are stored in `tts_settings.json` in the script directory and loaded au
 ## Troubleshooting
 
 ### No Voices Available
-- TTS relies on Windows SAPI5. Ensure the Speech API is present (it ships with Windows).
-- Click **Refresh** to reload the voice list.
-- Click **Voices** (or open `ms-settings:speech`) to install more voices.
+- **Windows:** TTS uses SAPI5 (ships with Windows). Click **Voices** / `ms-settings:speech`, then **Refresh**.
+- **Linux:** Install `espeak-ng` (and ensure `aplay` from `alsa-utils` works). Arch: `sudo pacman -S espeak-ng alsa-utils`.
 - Run `python check_voices.py` to list what is installed.
 
 ### pywin32 / COM Issues on Windows
@@ -183,6 +192,10 @@ Settings are stored in `tts_settings.json` in the script directory and loaded au
   pip install pywin32
   python -m pywin32_postinstall -install
   ```
+
+### Linux: No Speech / Silent Playback
+- Confirm `espeak-ng "hello"` and `aplay` work in a terminal.
+- Check default ALSA/PipeWire output (or open **Sound Output Settings** from the Audio tab).
 
 ### Settings Not Saving
 - `tts_settings.json` is written to the script directory. Check write permissions there, or run the app from a writable location.

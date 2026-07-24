@@ -1,0 +1,11 @@
+# Core TTS (SAPI5 on Windows via pywin32; espeak-ng on Linux)
+pyttsx3>=2.90
+Pillow>=10.0.0
+
+# Windows-only COM support for threaded SAPI5 speech
+pywin32>=306; sys_platform == "win32"
+
+# Speech-to-text (offline)
+numpy>=1.24.0
+sounddevice>=0.4.6
+faster-whisper>=1.0.0

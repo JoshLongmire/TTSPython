@@ -1,5 +1,20 @@
 # Changelog - TTSPython
 
+## Version 4.1.0 - 2026-07-24
+- Linux / Arch Linux support (cross-platform TTS)
+  - `pyttsx3` now initializes with the `espeak` driver on Linux/macOS (SAPI5 remains the Windows default)
+  - Platform-aware UI fonts (Noto/DejaVu/Liberation on Linux; Segoe UI on Windows)
+  - Voice refresh, Add Voices, and Sound Output actions use Linux-friendly messaging and openers
+    (`xdg-open`, `pavucontrol` / GNOME Sound, espeak-ng package hints)
+  - `check_voices.py` works on Linux with espeak-ng and prints Arch `pacman` install guidance
+- New Linux install path
+  - Added `requirements.txt` (Windows-only `pywin32` via environment marker)
+  - Added `dependencies.sh` for Linux/macOS venv + pip/uv install, with Arch/Linux system package notes
+    (`espeak-ng`, `alsa-utils`, `tk`, `portaudio`)
+- Documentation updated for Windows + Linux (Arch) install and troubleshooting
+- Bumped app version to 4.1.0
+---
+
 ## Version 4.0.0 - 2026-07-10
 - Complete graphical UI overhaul (visual-only, no behavior change)
   - Redesigned all 11 theme presets into cohesive modern palettes + consistent component styling

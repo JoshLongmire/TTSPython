@@ -2,13 +2,13 @@ import threading
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 from tkinter import font as tkfont
-import pyttsx3
 import os
 import json
 import re
 import time
 import gc
 import shutil
+import subprocess
 import tempfile
 import wave
 import sys
@@ -19,12 +19,69 @@ from datetime import datetime
 os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
 warnings.filterwarnings("ignore", message="You are sending unauthenticated requests to the HF Hub.*")
 
-__version__ = "4.0.0"
+__version__ = "4.1.0"
+
+IS_WINDOWS = sys.platform.startswith("win")
+IS_LINUX = sys.platform.startswith("linux")
+IS_DARWIN = sys.platform == "darwin"
+
+try:
+    import pyttsx3
+except ImportError:
+    pyttsx3 = None  # type: ignore[assignment]
 
 try:
     import pythoncom as _pythoncom  # type: ignore[import-not-found]
 except ImportError:
     _pythoncom = None
+
+
+def _init_tts_engine():
+    """Create a pyttsx3 engine using the best driver for this OS.
+
+    Windows: SAPI5 (default). Linux/macOS: espeak (espeak-ng compatible).
+    """
+    if pyttsx3 is None:
+        raise RuntimeError(
+            "pyttsx3 is not installed. Install dependencies "
+            "(see requirements.txt or dependencies.sh / dependencies.bat)."
+        )
+    if IS_WINDOWS:
+        return pyttsx3.init()
+    # Prefer espeak explicitly so Linux does not try a missing nsss/sapi driver.
+    try:
+        return pyttsx3.init("espeak")
+    except Exception:
+        return pyttsx3.init()
+
+
+def _ui_font_family():
+    """Pick a UI font that exists on the current platform."""
+    if IS_WINDOWS:
+        return "Segoe UI"
+    if IS_DARWIN:
+        return "Helvetica Neue"
+    # Linux: prefer widely packaged sans fonts.
+    for family in ("Noto Sans", "DejaVu Sans", "Liberation Sans", "FreeSans", "Sans"):
+        try:
+            if family in tkfont.families():
+                return family
+        except Exception:
+            pass
+    return "Sans"
+
+
+def _open_uri(uri_or_path):
+    """Open a settings URI or file with the platform default handler."""
+    if IS_WINDOWS:
+        os.startfile(uri_or_path)  # type: ignore[attr-defined]
+        return
+    opener = "open" if IS_DARWIN else "xdg-open"
+    subprocess.Popen(
+        [opener, uri_or_path],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
 
 
 def _com_init_thread():
@@ -49,7 +106,6 @@ def _com_deinit_thread(com_initialized):
         _pythoncom.CoUninitialize()
     except Exception:
         pass
-
 
 # --- Color emoji rendering -------------------------------------------------
 # Tk paints color-emoji fonts as monochrome outline glyphs on Windows, so we
@@ -304,8 +360,9 @@ class GradientHeader(tk.Canvas):
         # Lazily create shared fonts once (requires a live Tk root) so opening
         # dialogs repeatedly does not accumulate new Font objects.
         if cls._title_font is None:
-            cls._title_font = tkfont.Font(family="Segoe UI", size=15, weight="bold")
-            cls._subtitle_font = tkfont.Font(family="Segoe UI", size=8)
+            family = _ui_font_family()
+            cls._title_font = tkfont.Font(family=family, size=15, weight="bold")
+            cls._subtitle_font = tkfont.Font(family=family, size=8)
         return cls._title_font, cls._subtitle_font
 
     def __init__(self, master, title="", subtitle="", height=60, **kwargs):
@@ -407,23 +464,29 @@ class ReaderApp:
         
         # Initialize engine just to get default settings and voices
         try:
-            temp_engine = pyttsx3.init()
+            temp_engine = _init_tts_engine()
             self.default_rate = temp_engine.getProperty("rate")
             self.default_volume = temp_engine.getProperty("volume")
             self.voices = temp_engine.getProperty("voices")
             temp_engine.stop()  # Clean up temp engine
         except Exception as e:
             # Fallback if engine initialization fails
-            messagebox.showerror("TTS Engine Error", 
-                               f"Failed to initialize TTS engine: {str(e)}\n\n"
-                               f"The app may not work correctly.\n"
-                               f"Please ensure pyttsx3 is installed properly.")
+            hint = (
+                "Please ensure pyttsx3 and pywin32 are installed."
+                if IS_WINDOWS
+                else "Please ensure pyttsx3 is installed and espeak-ng (+ alsa-utils/aplay) are available."
+            )
+            messagebox.showerror(
+                "TTS Engine Error",
+                f"Failed to initialize TTS engine: {str(e)}\n\n"
+                f"The app may not work correctly.\n{hint}",
+            )
             self.default_rate = 150
             self.default_volume = 1.0
             self.voices = []
 
         # --- UI ---
-        self.ui_font_family = "Segoe UI"
+        self.ui_font_family = _ui_font_family()
         self.base_font = tkfont.Font(family=self.ui_font_family, size=10)
         self.text_font = tkfont.Font(family=self.ui_font_family, size=11)
 
@@ -1527,7 +1590,7 @@ class ReaderApp:
                 # Speak the item
                 engine = None
                 try:
-                    engine = pyttsx3.init()
+                    engine = _init_tts_engine()
                     self.current_engine = engine
                     self.all_engines.append(engine)  # Track all engines for global stop
                     
@@ -1620,7 +1683,7 @@ class ReaderApp:
             current_voice_name = self.voice_combo.get()
             
             # Re-initialize engine to get updated voice list
-            temp_engine = pyttsx3.init()
+            temp_engine = _init_tts_engine()
             self.voices = temp_engine.getProperty("voices")
             temp_engine.stop()
             
@@ -1645,43 +1708,115 @@ class ReaderApp:
             self.status_var.set(f"Voices refreshed! Found {len(self.voices)} voice(s)")
             
             # Show info if new voices were found
-            messagebox.showinfo("Voices Refreshed", 
-                              f"Found {len(self.voices)} voice(s) installed on your system.\n\n"
-                              f"To add more voices:\n"
-                              f"1. Open Windows Settings\n"
-                              f"2. Go to Time & Language → Speech\n"
-                              f"3. Click 'Add voices'\n"
-                              f"4. Click 🔄 to refresh again!")
+            if IS_WINDOWS:
+                how_to = (
+                    "To add more voices:\n"
+                    "1. Open Windows Settings\n"
+                    "2. Go to Time & Language → Speech\n"
+                    "3. Click 'Add voices'\n"
+                    "4. Click 🔄 to refresh again!"
+                )
+            elif IS_LINUX:
+                how_to = (
+                    "Linux uses espeak-ng voices via pyttsx3.\n"
+                    "Install more languages with your package manager\n"
+                    "(e.g. espeak-ng / espeak-ng-espeak), then refresh."
+                )
+            else:
+                how_to = "Install additional system TTS voices, then refresh."
+            messagebox.showinfo(
+                "Voices Refreshed",
+                f"Found {len(self.voices)} voice(s) installed on your system.\n\n{how_to}",
+            )
             
         except Exception as e:
             messagebox.showerror("Error", f"Failed to refresh voices: {str(e)}")
             self.status_var.set("Failed to refresh voices")
 
     def open_voice_settings(self):
-        """Open Windows voice settings so users can install more voices."""
-        try:
-            # Windows settings URI for speech voices.
-            os.startfile("ms-settings:speech")
-            self.status_var.set("Opened Windows Speech settings")
+        """Open OS voice / speech settings so users can install more voices."""
+        if IS_WINDOWS:
+            try:
+                _open_uri("ms-settings:speech")
+                self.status_var.set("Opened Windows Speech settings")
+                messagebox.showinfo(
+                    "Add Voices",
+                    "Windows Speech settings opened.\n\n"
+                    "Install voices there, then return and click 🔄 to refresh."
+                )
+            except Exception:
+                messagebox.showinfo(
+                    "Add Voices",
+                    "Could not open Windows settings automatically.\n\n"
+                    "Open Settings manually:\n"
+                    "Time & Language -> Speech -> Add voices"
+                )
+            return
+        if IS_LINUX:
+            # Best-effort: open docs or sound settings; espeak voices come from packages.
+            for candidate in (
+                "https://github.com/espeak-ng/espeak-ng",
+                "gnome-control-center sound",
+            ):
+                try:
+                    if candidate.startswith("http"):
+                        _open_uri(candidate)
+                    else:
+                        subprocess.Popen(
+                            candidate.split(),
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL,
+                        )
+                    break
+                except Exception:
+                    continue
+            self.status_var.set("Opened voice help")
             messagebox.showinfo(
                 "Add Voices",
-                "Windows Speech settings opened.\n\n"
-                "Install voices there, then return and click 🔄 to refresh."
+                "On Linux, TTSPython uses espeak-ng via pyttsx3.\n\n"
+                "Install language packs with your distro packages\n"
+                "(espeak-ng), then click 🔄 to refresh the voice list."
             )
-        except Exception:
-            messagebox.showinfo(
-                "Add Voices",
-                "Could not open Windows settings automatically.\n\n"
-                "Open Settings manually:\n"
-                "Time & Language -> Speech -> Add voices"
-            )
+            return
+        messagebox.showinfo(
+            "Add Voices",
+            "Install additional system TTS voices for your platform,\n"
+            "then click 🔄 to refresh."
+        )
 
     def open_sound_output_settings(self):
-        """Open Windows output sound settings."""
-        try:
-            os.startfile("ms-settings:sound")
-        except Exception:
-            messagebox.showinfo("Audio Output", "Open Windows Settings and go to System -> Sound.")
+        """Open OS output sound settings."""
+        if IS_WINDOWS:
+            try:
+                _open_uri("ms-settings:sound")
+            except Exception:
+                messagebox.showinfo(
+                    "Audio Output",
+                    "Open Windows Settings and go to System -> Sound.",
+                )
+            return
+        if IS_LINUX:
+            for cmd in (
+                ["gnome-control-center", "sound"],
+                ["pavucontrol"],
+                ["xdg-open", "settings://sound"],
+            ):
+                try:
+                    subprocess.Popen(
+                        cmd,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                    )
+                    return
+                except Exception:
+                    continue
+            messagebox.showinfo(
+                "Audio Output",
+                "Open your desktop sound settings (or pavucontrol)\n"
+                "to choose the default playback device.",
+            )
+            return
+        messagebox.showinfo("Audio Output", "Open System Settings → Sound.")
 
     def on_paste(self):
         try:
@@ -1771,7 +1906,7 @@ class ReaderApp:
         com_initialized = _com_init_thread()
         error = None
         try:
-            engine = pyttsx3.init()
+            engine = _init_tts_engine()
             engine.setProperty("rate", self.rate.get())
             engine.setProperty("volume", self.vol.get())
             if self.selected_voice:
@@ -1844,7 +1979,7 @@ class ReaderApp:
         
         try:
             # Create a fresh engine for each speech to avoid lifecycle issues
-            engine = pyttsx3.init()
+            engine = _init_tts_engine()
             self.current_engine = engine  # Store reference for stop functionality
             self.all_engines.append(engine)  # Track all engines for global stop
             
@@ -2279,9 +2414,15 @@ class SettingsDialog:
         )
         self.output_combo.grid(row=1, column=1, sticky="ew", pady=(0, 8))
 
+        if IS_WINDOWS:
+            tts_device_note = "TTS output follows Windows default playback device for pyttsx3."
+        elif IS_LINUX:
+            tts_device_note = "TTS output follows the system default ALSA/PipeWire device (espeak/aplay)."
+        else:
+            tts_device_note = "TTS output follows the system default playback device for pyttsx3."
         ttk.Label(
             audio_frame,
-            text="TTS output follows Windows default playback device for pyttsx3.",
+            text=tts_device_note,
             style="Muted.TLabel"
         ).grid(row=2, column=0, columnspan=2, sticky="w")
         self.stt_unload_var = tk.BooleanVar(value=self.app.stt_unload_model_when_idle)
@@ -2305,9 +2446,14 @@ class SettingsDialog:
             textvariable=self.stt_auto_unload_minutes_var,
             width=8
         ).grid(row=5, column=1, sticky="w", pady=(0, 8))
+        sound_btn_label = (
+            "Open Windows Sound Output Settings"
+            if IS_WINDOWS
+            else "Open Sound Output Settings"
+        )
         ttk.Button(
             audio_frame,
-            text="Open Windows Sound Output Settings",
+            text=sound_btn_label,
             command=self.app.open_sound_output_settings
         ).grid(row=6, column=0, columnspan=2, sticky="w", pady=(8, 0))
         audio_frame.columnconfigure(1, weight=1)
