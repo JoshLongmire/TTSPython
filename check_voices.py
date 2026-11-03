@@ -1,77 +1,65 @@
 #!/usr/bin/env python3
 """
 Quick script to check what TTS voices are installed on your system.
+Uses the same speech engine as the app (SAPI5 on Windows, espeak-ng on Linux).
 """
 
+import os
 import sys
 
-try:
-    import pyttsx3
-except ImportError:
-    print("\n❌ Error: pyttsx3 is not installed.")
-    print("Install dependencies: pip install -r requirements.txt\n")
-    sys.exit(1)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 IS_WINDOWS = sys.platform.startswith("win")
 IS_LINUX = sys.platform.startswith("linux")
 
 
-def _init_engine():
-    if IS_WINDOWS:
-        return pyttsx3.init()
-    try:
-        return pyttsx3.init("espeak")
-    except Exception:
-        return pyttsx3.init()
-
-
 def check_voices():
     """List all available TTS voices on the system."""
     try:
+        from ttspython.core.tts.render import list_voices_once
+    except ImportError as exc:
+        print(f"\nError: a dependency is missing ({exc}).")
+        print("Install dependencies: pip install -r requirements.txt\n")
+        sys.exit(1)
+
+    try:
         print("\n" + "=" * 60)
-        print("🎤 TTS VOICE CHECKER")
+        print("TTS VOICE CHECKER")
         print("=" * 60 + "\n")
 
-        engine = _init_engine()
-        voices = engine.getProperty("voices")
-
-        backend = "SAPI5" if IS_WINDOWS else ("espeak-ng" if IS_LINUX else "system")
+        backend, voices = list_voices_once()
         print(f"Backend: {backend}")
         print(f"Found {len(voices)} voice(s) installed on your system:\n")
 
         for i, voice in enumerate(voices, 1):
-            print(f"{'─' * 60}")
+            print("-" * 60)
             print(f"Voice #{i}")
-            print(f"{'─' * 60}")
+            print("-" * 60)
             print(f"  Name:      {voice.name}")
             print(f"  ID:        {voice.id}")
-            print(f"  Languages: {voice.languages if voice.languages else 'Not specified'}")
-            print(f"  Gender:    {voice.gender if hasattr(voice, 'gender') else 'Not specified'}")
-            print(f"  Age:       {voice.age if hasattr(voice, 'age') else 'Not specified'}")
+            print(f"  Language:  {voice.language or 'Not specified'}")
+            print(f"  Gender:    {voice.gender or 'Not specified'}")
             print()
 
-        engine.stop()
-
         print("=" * 60)
-        print("\n💡 To add more voices:")
+        print("\nTo add more voices:")
         if IS_WINDOWS:
             print("   1. Open Windows Settings (Win + I)")
-            print("   2. Go to: Time & Language → Speech")
-            print("   3. Click 'Add voices'")
-            print("   4. Download voices you want")
-            print("   5. Click 🔄 in the TTS app to refresh!")
-            print("\n📖 See ADD_VOICES_GUIDE.md for detailed instructions")
+            print("   2. Go to: Time & language > Speech")
+            print("   3. Click 'Add voices' and download the ones you want")
+            print("   4. Press Refresh next to the voice list in TTSPython")
+            print("\nSee ADD_VOICES_GUIDE.md for detailed instructions")
         elif IS_LINUX:
             print("   Install espeak-ng language data via your package manager,")
-            print("   then refresh voices in the app (🔄).")
+            print("   then press Refresh next to the voice list in TTSPython.")
             print("   Example (Arch): sudo pacman -S espeak-ng")
         else:
             print("   Install additional system TTS voices for your platform.")
         print("=" * 60 + "\n")
 
     except Exception as e:
-        print(f"\n❌ Error: {str(e)}")
-        print("Make sure pyttsx3 is installed: pip install pyttsx3\n")
+        print(f"\nError: {e}")
+        print("Make sure the requirements are installed: pip install -r requirements.txt\n")
         sys.exit(1)
 
 

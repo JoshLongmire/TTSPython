@@ -1,0 +1,6 @@
+-r requirements.txt
+pytest>=8
+pytest-qt>=4.4
+psutil>=5.9
+pyinstaller>=6.10   # build.bat / build.sh
+soundcard>=0.4.3; sys_platform == "win32"

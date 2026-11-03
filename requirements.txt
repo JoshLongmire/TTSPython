@@ -1,11 +1,18 @@
-# Core TTS (SAPI5 on Windows via pywin32; espeak-ng on Linux)
+# GUI
+PySide6-Essentials>=6.7
+
+# Text-to-speech (SAPI5 on Windows via comtypes; espeak-ng on Linux)
 pyttsx3>=2.90
-Pillow>=10.0.0
+comtypes>=1.2; sys_platform == "win32"
 
-# Windows-only COM support for threaded SAPI5 speech
-pywin32>=306; sys_platform == "win32"
-
-# Speech-to-text (offline)
+# Audio playback, recording and MP3 export
 numpy>=1.24.0
 sounddevice>=0.4.6
-faster-whisper>=1.0.0
+lameenc>=1.7
+
+# Speech-to-text (offline)
+faster-whisper>=1.1.0
+sherpa-onnx>=2.0.1  # instant live preview while dictating (its model downloads on first use)
+
+# Global hotkeys and typing at the cursor on Linux (X11)
+pynput>=1.7; sys_platform == "linux"

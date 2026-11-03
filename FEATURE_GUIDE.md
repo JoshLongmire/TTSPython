@@ -1,165 +1,119 @@
-# TTSPython Features Guide (v4.0.0)
+# TTSPython Features Guide (v5)
 
-## Features
+## The main window
 
-### Speech Queue System
-- **Panel**: Dedicated queue panel in the main window (a tree view with a color icon per item: 💬 text / 📄 file / 📋 clipboard)
-- **Functionality**: Queue multiple text sections or files to be read in sequence
-- **Features**:
-  - **Add Current Text**: Add the text currently in the editor to the queue
-  - **Add File(s)**: Select multiple text files to add to queue at once
-  - **Play Queue**: Start sequential playback of all queued items
-  - **Remove Selected**: Remove a specific item from the queue (or press **Delete**)
-  - **Clear Queue**: Remove all items from the queue
-  - **Move Up** / **Move Down**: Reorder queue items
-  - **Loop queue**: Repeat playback from the top when the queue finishes
-  - Now-playing item highlighted with the theme accent color
-  - Shows item count and progress
-  - Can be stopped mid-playback with the Stop button
-  - 0.5 second pause between queue items
-- **Use Cases**:
-  - Create audiobook playlists from multiple chapter files
-  - Queue up multiple articles or documents for continuous listening
-  - Prepare a reading list for hands-free consumption
-  - Test different text segments without manual intervention
+- **Top bar**: app name and version, the **Speak / Listen** switch, and buttons for Open (its arrow lists recent files), Save, Save as, Export audio, Find and replace, Mini mode and Settings. Hover a button to see what it does (and its shortcut, if it has one).
+- **Editor card**: the document name (with a dot when there are unsaved changes), live word and character counts with the reading time at the current speed, **Paste** and **Clear** (Clear can be undone with `Ctrl+Z`; it also detaches the file, so Save asks where to save). The window title shows the file name too.
+- **Speech queue panel** on the right (show or hide it with `Ctrl+Q` or the queue button at the bottom right).
+- **Control bar** at the bottom: Play/Pause, Stop, Speak selected, the current sentence and progress, a live waveform, speed (in percent) and volume. The voice is picked in Settings > Speech or the mini bar's popover.
+- **Status bar**: messages, the clipboard monitor controls, Performance Mode and the output device in use (click it to change it). On narrow windows the output device and then Performance Mode make room (both are also in Settings).
 
-## 🎙️ Speech-to-Text (STT)
+## Speak (text-to-speech)
 
-The app can also convert your speech to text, fully offline:
+- **Play** (`Ctrl+Enter`) reads the whole editor. Press it again to **pause** and again to **resume** (`Ctrl+Space` also pauses and resumes).
+- **Speak selected** reads only the selection. If something is already playing, it switches to the selection.
+- **Speak from here** (`Ctrl+Alt+Enter`, or right-click in the editor) reads from the start of the sentence where the cursor is to the end.
+- **Stop** (`Esc`) ends speech immediately.
+- The **sentence being read is highlighted** and the editor scrolls to keep it in view. Editing the text while it reads simply turns the highlight off for that run. You can disable highlighting in Settings > Speech.
+- **Speed** goes from 50% to 200% (100% is the old 200 words per minute) and **volume** from 10% to 100%. Both change **while it speaks**: drag the speed slider and every step is heard as you drag (within 10 ms), mid-sentence, with the same pitch. Behind the scenes the audio is time-stretched as it plays, 10 ms at a time, and once you let go the next sentences are prepared again at the new speed for the most natural sound.
+- **Voice**: pick it in Settings > Speech or the mini bar's popover. Changing it while speaking continues from the word being read, in the new voice.
+- **More voices**: Settings > Speech > **Get more voices** downloads natural-sounding Piper voices (see [ADD_VOICES_GUIDE.md](ADD_VOICES_GUIDE.md)). On Windows, the Windows 11 speech voices are listed next to the classic ones.
+- **Output device**: pick where speech plays in Settings > Speech and press **Test** (Cancel puts back your saved choice). Every device from every audio system is listed; ones outside the default system show it in brackets, for example "(WASAPI)". The choice is remembered by device name, so it survives unplugging and reconnecting. A device plugged in after start shows up when Settings opens, or with **Refresh**.
+- If the output device disappears while speaking, speech stops with a message instead of hanging.
+- How it works: sentences are prepared a few seconds ahead of what you hear, so speech starts quickly and long documents never wait.
+- A long pause releases the audio device after 10 seconds; Resume picks it up again.
 
-- **Engine**: faster-whisper, running locally on CPU using int8 quantization (no internet or API keys required)
-- **Controls**: A **Mode** toggle button switches between TTS and STT. In STT mode, a Start/Stop Recording button appears
-- **Recording**: Press Start Recording to capture from your microphone; press again (or Stop) to transcribe. The transcript is inserted into the editor
-- **Performance**: The STT model is loaded on demand and can be unloaded to free memory
-- **Options** (Settings → Audio tab):
-  - Choose the STT input microphone
-  - Unload STT model when idle (frees RAM, slower next transcription)
-  - Auto-unload STT model after an idle delay (in minutes)
+## Listen (speech-to-text)
 
-## Other Features
+- Switch to **Listen** (`Ctrl+M`). A dictation panel appears under the editor with a record button, a live input waveform and the current model and microphone.
+- Press record, speak, press again. The transcript is cleaned up (capital first letter, final punctuation) and added to the editor.
+- When dictating into another app (the mini bar's mic or `Ctrl+Alt+D`), a **caption bubble** above the bar shows each word about half a second after you say it. A small, fast **instant preview** recognizer shows the words first (a little dimmer); Whisper checks them whenever you pause, or every couple of seconds while you keep talking, and corrects them in place. The newest word is highlighted. The bubble is only as big as the text (up to three lines, larger than the app's text) and grows upward, so the newest words stay right above the bar. **X** or `Esc` cancels the dictation; nothing is typed.
+- Because Whisper checks at each pause, the text is usually ready when you stop: typed almost at once if you paused first, otherwise within about a second and a half. Long dictations settle at real pauses in the audio as you go (never in the middle of a word), so the wait stays short however long you talk.
+- The instant preview needs a 73 MB model, downloaded once in the background the first time you dictate (its progress shows in the status bar only; a pop-up appears only if it fails). It works for English; with another language the captions come from Whisper alone. While loaded it uses about 140 MB of memory, freed together with the Whisper model when that unloads. Turn it off in **Settings > Listen > Instant live preview**, and delete its model in the downloaded models list.
+- Dictation keeps full speed while TTSPython is in the background: Windows 11 runs background apps in efficiency mode, which made each Whisper pass 2.6 times slower, so TTSPython opts out.
+- If the microphone delivers only silence (muted, or blocked in Windows privacy settings), you are told so.
+- **Settings > Listen**:
+  - Microphone, with a live level meter so you can check it hears you, and **Refresh** for one plugged in later.
+  - **Whisper model**: Tiny, Base, Small (default), Medium, Large v3, Large v3 Turbo, Distil Large v3. A model downloads the first time it is used; the download progress shows in the status bar, the Listen panel and next to the mini bar.
+  - **Downloaded models** with their size and a **Delete** button.
+  - **Language**: English (default), Auto-detect, or one of 15 common languages.
+  - **Unload the model after each dictation** or **Unload when idle** after 1 to 60 minutes.
+  - How dictation reaches other apps (type at the cursor, or copy to the clipboard only) and the paste keys to use (Ctrl+V, or Shift+Insert for terminals).
 
-### 1. 🎵 Export Audio to File
-- **Button**: "Export Audio" (color icon) in the file operations bar
-- **Functionality**: Export your text as WAV or MP3 audio files
-- **How to Use**: Click the button, choose save location, and the current text will be saved as an audio file
-- Runs in a background thread, so the UI stays responsive while exporting; the button is disabled until it finishes
-- **Hotkey**: `Ctrl+E`
+## Mini mode
 
-### 2. 🎨 Themes (11 Presets)
-- **Location**: Settings → Theme tab
-- **Functionality**: Choose from 11 built-in color presets (not just a Dark/Light toggle)
-- **Available themes**: Dark, Twilight, Light, High Contrast, Forest, New Vegas, Spiral, Poly, Sunset, Paper, Graphite
-- **Features**:
-  - Theme applies to the whole window, including the editor, queue, and highlight colors
-  - The now-playing queue item is highlighted with the theme accent color
-  - Switch themes anytime in **Settings → Theme** (applies to the whole window, including the editor, queue, and highlight colors)
-  - Performance Mode toggle (lowers UI update frequency and clipboard polling) is also on the Theme tab
-  - Settings persist between sessions
+- A compact bar that floats above every window. It **never takes keyboard focus**, so the app you were typing in keeps its cursor.
+- **Mic**: dictate into whatever app you are using. The text is typed at the cursor. Your clipboard is restored afterwards, and the dictated text is kept out of Windows clipboard history.
+- **Play**: reads the text you have highlighted in the app you are using, or the clipboard when nothing is highlighted. Press again to stop.
+- **Waveform**: shows your voice while dictating and the speech while reading.
+- **Chevron or right-click**: a popover for voice, speed and volume, **Pause/Resume**, and Hide mini mode.
+- **Mouse wheel** over the bar: volume up or down in 5% steps.
+- **Expand**: back to the full window.
+- Drag the bar by its grip or any empty area. It snaps to screen edges (Settings > Mini mode) and remembers where you left it.
 
-### 3. 🔍 Find & Replace
-- **Button**: "🔍 Find/Replace" in the file operations bar
-- **Hotkey**: `Ctrl+F`
-- **Features**:
-  - Find Next - locate text in your document
-  - Replace - replace current selection
-  - Replace All - replace all occurrences at once
-  - Case-sensitive search option
-  - Regular expression (regex) support
-  - Highlights found text automatically
+## Global hotkeys
 
-### 4. ⚙️ Settings - Hotkey Customization
-- **Button**: "⚙️ Settings" in the file operations bar
-- **Functionality**: Customize all keyboard shortcuts to your preference
-- **Features**:
-  - Visual hotkey capture (just press your desired key combo)
-  - Reset to defaults restores hotkeys, theme, Performance Mode, and STT/audio settings
-  - All 10 actions are customizable:
-    - Speak All Text
-    - Speak Selected Text
-    - Stop Speaking
-    - Open File
-    - Save File
-    - Save As
-    - Paste Text
-    - Clear Text
-    - Find/Replace
-    - Export Audio
+Toggle style: press once to start, again to stop.
 
-### 5. 📎 Clipboard Monitoring (Enhanced!)
-- **Controls**: "📎 Monitor Clipboard" with Speak/Queue radio buttons
-- **Functionality**: Automatically speaks OR queues text when you copy it
-- **Two Modes**:
-  - **Speak Mode**: Immediately speaks copied text (original behavior)
-  - **Queue Mode**: Adds copied text to speech queue for later playback ⭐ NEW!
-- **Features**:
-  - Toggle monitoring on/off easily
-  - Choose action: immediate speak or add to queue
-  - Only speaks when not already speaking (Speak mode)
-  - Ignores very short clipboard content (< 5 chars)
-  - Monitors clipboard every second (every 2 seconds when Performance Mode is on)
-  - Queue items show a "📋 Clipboard:" (Queue mode) or "📋 Auto-Queued:" (Speak + Auto-Queue) prefix
-  - Auto-Queue option: when already speaking, copied text is added to the queue instead of being ignored
-  - Perfect for collecting multiple web articles!
+| Action | Default |
+|--------|---------|
+| Start or stop dictation | `Ctrl+Alt+D` |
+| Speak highlighted text or clipboard (again to stop) | `Ctrl+Alt+S` |
+| Stop speaking | `Ctrl+Alt+X` |
+| Show or hide mini mode | `Ctrl+Alt+Shift+M` |
+| Pause or resume speech, Show main window | unassigned |
 
-### 6. ✨ Word Highlighting
-- **Feature**: Automatically highlights words as they're being spoken
-- **Visual Feedback**: 
-  - Highlight uses the theme accent color
-  - Auto-scrolls to keep the highlighted word visible
-  - Clears when speech stops
-- **How It Works**: Uses TTS engine callbacks to track word position (when supported by the engine; disabled on Python 3.13+ for stability)
+Change them in **Settings > Shortcuts**. If another program already owns a combination, the row says so, the status bar says so at start, and a pop-up tells you once (the first time that key is found taken). TTSPython tries again a few seconds after starting, in case the key was only busy for a moment. Mini mode moved to `Ctrl+Alt+Shift+M` because other apps often take `Ctrl+Alt+M`; settings saved by earlier 5.0 builds keep their keys. On Wayland, use the command-line options (`--toggle-dictation`, `--speak-clipboard`, `--stop`, `--pause`, `--mini`, `--show`) from a desktop keyboard shortcut instead.
 
-## 💾 Settings Persistence
+## Speech queue
 
-The application now saves your preferences in `tts_settings.json`:
-- Selected theme preset and Performance Mode
-- Clipboard monitoring enabled/disabled, action mode, and Auto-Queue
-- STT settings (model, input device, unload behavior, auto-unload minutes)
-- Custom hotkey mappings
+- **Add text** (the editor contents), **Add files** (several at once) and clipboard items (from the clipboard monitor).
+- **Play queue** starts at the selected item (or the top). Double-click an item or press `Enter` to play from it. Items are separated by a half-second pause.
+- **Right-click** an item: Play from here, Move to top, Copy to the editor, Remove.
+- **Drop text files** on the queue to add them.
+- **Drag** items to reorder, or use the up and down arrows. **Remove** (or Delete) and **Clear queue**.
+- **Loop** repeats the whole queue.
+- Each row shows the item type, word count and listening time; the playing item is marked with an accent bar.
+- The queue is kept when you quit and comes back the next time.
+- Changing the queue while it plays is safe: removed items are skipped and moved items play in their new place.
 
-These settings are automatically loaded when you restart the application.
+## Clipboard monitor
 
-## 🎮 Default Hotkeys
+In the status bar (or Settings > Clipboard):
+- **Clipboard** switch turns it on. Text already on the clipboard when you turn it on is not used.
+- **Speak** reads copied text right away; **Queue** adds it to the queue.
+- **Auto-Queue**: while speech is playing, copied text is queued instead of ignored, and queued items play once after the current speech.
+- Text shorter than 6 characters is ignored, and so is text TTSPython itself put on the clipboard.
 
-| Action | Default Hotkey |
-|--------|----------------|
-| Speak All | `Ctrl+Enter` |
-| Speak Selected | `Ctrl+Shift+Enter` |
-| Stop | `Escape` |
-| Open File | `Ctrl+O` |
-| Save File | `Ctrl+S` |
-| Save As | `Ctrl+Shift+S` |
-| Paste | `Ctrl+V` |
-| Clear | `Ctrl+L` |
-| Find/Replace | `Ctrl+F` |
-| Export Audio | `Ctrl+E` |
+## Export audio
 
-## 🚀 Usage Tips
+- **Export audio** (`Ctrl+E`) saves the editor text, or only the selection if there is one, as **WAV** or **MP3** (128 kbps) with the current voice, speed and volume.
+- It runs in the background with progress in the status bar and a Cancel button, and writes as it goes (a long book never sits in memory). Files are written to a temporary name first, so a cancelled or failed export never leaves a half-written file.
+- The folder and format you used last are suggested next time; **Open folder** appears in the status bar when it is done.
 
-1. **Speech Queue for Audiobooks**: Add multiple chapter files to the queue and let them play sequentially - perfect for listening to entire books!
-2. **Export Audio for Audiobooks**: Type or paste long text and export to WAV for podcast/audiobook creation
-3. **Clipboard Auto-speak**: Enable for hands-free reading of copied text
-4. **Custom Hotkeys**: Set up shortcuts that match your workflow (e.g., gaming-style WASD controls)
-5. **Themes**: Pick a preset that suits your environment — e.g., Dark or Twilight for late-night reading, Light or Paper for bright conditions
-6. **Find & Replace**: Great for fixing typos before speaking or exporting
-7. **Word Highlighting**: Follow along visually while listening to improve comprehension
-8. **Queue Workflow**: Add text → Add files → Review queue → Play queue → Relax and listen!
+## Find and replace
 
-## 🎨 UI Enhancements (v4.0.0)
+- `Ctrl+F` opens an inline bar above the text (only one, however many times you press it).
+- **Match case** and **Regular expression** options, previous and next with wrap-around (Enter and Shift+Enter), and a match count ("3 matches", then "2 of 3").
+- **Replace** replaces the current match; **Replace all** does every match in one step that `Ctrl+Z` undoes. In normal (non-regex) mode the replacement is used exactly as typed, including backslashes.
 
-- **Gradient header bar**: The window now features a refined gradient header showing the title (`TTSPython 4.0.0`) and Mode toggle
-- **Refined styling**: Updated controls, panels, and color theming throughout the app
-- **Color emoji icons**: Toolbar, file, queue, and STT buttons show color emoji icons (rendered to bitmaps via Pillow so they are not gray outline glyphs on Windows)
-- **Larger window**: Increased minimum size to 700x400 for better usability
-- **More buttons**: All features accessible from the main window
-- **Better organization**: File operations grouped together; theming is set in Settings → Theme
-- **Status updates**: All actions provide feedback in the status bar
+## Files
 
-## 🔧 Technical Details
+- **Open** reads UTF-8 (with or without BOM), UTF-16 and Windows-1252 text and remembers the file's encoding and line endings; **Save** writes them back the same way, so an unchanged file stays byte-for-byte identical.
+- **New** (`Ctrl+N`) starts an empty document. Drop a text file on the editor to open it. The Open button's arrow lists the last 8 files.
+- Opening a file, New, closing the window or quitting asks before discarding unsaved changes.
+- Unsaved text is kept every 30 seconds (and when Windows logs off or shuts down) and put back the next time TTSPython starts, even after a crash.
 
-- **Settings File**: `tts_settings.json` (auto-created in app directory)
-- **Audio Formats**: WAV (best quality), MP3 (if supported by engine)
-- **Theme Colors**: 11 presets carefully chosen for readability, with highlight colors that adapt per theme
-- **Thread-Safe**: All UI updates from background threads are properly synchronized
-- **Engine Management**: Still uses fresh engines per operation (best practice)
+## Themes and appearance
 
+- 12 themes in **Settings > Appearance**: Studio, Dark, Twilight, Light, High Contrast, Forest, New Vegas, Spiral, Poly, Sunset, Paper, Graphite. Clicking a theme previews it; **Save** keeps it, **Cancel** goes back.
+- Every theme is checked for readable contrast on text, buttons and selections. High Contrast also uses thicker borders.
+- **Performance Mode** halves waveform frame rates (30 to 15 per second) and turns off the animations of the status-bar switches.
+
+## Settings
+
+- Saved automatically to `%APPDATA%\TTSPython\settings.json` (Windows) or `~/.config/ttspython/settings.json` (Linux). Your TTSPython 4 settings are imported on first start and the old file is left alone.
+- **Save** keeps the changes and closes; **Cancel** undoes them (theme, speed and volume previews included) and closes; closing the window with unsaved changes asks. **Reset to Defaults** puts the settings on these pages back to their defaults (Save to keep them). Speed and volume apply as you move them. `Ctrl+,` opens Settings.
+- The pages fit any window size: on a narrow window the controls move under their labels instead of being cut off.
+- The window size, position and layout, voice, speed, volume, queue options and mini bar position are remembered between sessions.
+- **General > Closing the window keeps TTSPython running in the tray** (quit from the tray menu).

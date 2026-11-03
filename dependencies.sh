@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# TTSPython dependency installer (Linux / macOS)
+# TTSPython dependency installer (Linux)
 # Installs missing Python packages only; does not upgrade Python or pip.
 set -euo pipefail
 
@@ -51,8 +51,10 @@ echo "========================================="
 if [[ "$(uname -s)" == "Linux" ]]; then
   echo
   echo "Linux system packages (if missing):"
-  echo "  - espeak-ng   (TTS voices; required by pyttsx3)"
-  echo "  - alsa-utils  (aplay; used by pyttsx3 for playback)"
-  echo "  - tk / tcl    (tkinter GUI)"
-  echo "  - portaudio   (microphone input for STT)"
+  echo "  - espeak-ng        (TTS voices)"
+  echo "  - portaudio        (speech playback and microphone input)"
+  echo "  - xcb-util-cursor  (Qt window support; Debian/Ubuntu: libxcb-cursor0)"
+  echo "  - wtype            (optional, Wayland: type dictation at the cursor)"
+  echo "  Arch:   sudo pacman -S espeak-ng portaudio xcb-util-cursor"
+  echo "  Debian: sudo apt install espeak-ng libportaudio2 libxcb-cursor0"
 fi

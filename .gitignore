@@ -15,17 +15,31 @@ venv/
 env/
 ENV/
 
-# App-local runtime state
+# Secrets
+.env*
+!.env.example
+*.key
+*.pem
+credentials*
+
+# App runtime state (a settings file next to the app: --settings, or v4's tts_settings.json)
 tts_settings.json
-tts_settings.broken.*.json
-tts_settings.json.tmp
+settings.json
+settings.json.tmp
+settings.broken.*.json
+recovery.json
+queue.json
 
 # Exported audio (runtime output, not source)
 *.wav
 *.mp3
+*.part
 
-# Windows shortcut (binary)
-TTSPython.lnk
+# Test, lint, benchmark and screenshot output
+.pytest_cache/
+.ruff_cache/
+.cache/
+shots/
 
 # Logs
 *.log
@@ -34,9 +48,6 @@ TTSPython.lnk
 Thumbs.db
 Desktop.ini
 ehthumbs.db
-$DNEXT/
+.DS_Store
 .idea/
 .vscode/
-
-# Kilo planning notes (ephemeral)
-.kilo/plans/

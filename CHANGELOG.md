@@ -1,5 +1,158 @@
 # Changelog - TTSPython
 
+## Version 5.0.0 - 2026-11-03
+- Measured against 4.1.0 on the same Windows PC (median of 10 runs):
+  startup to first window 1012 ms -> 976 ms; idle memory 65 MB -> 130 MB (RSS), mostly the Qt interface and
+  keeping the voice loaded for instant speech; Python packages about 197 MB larger (Qt replaces Pillow).
+  Tests: 283 pass (plus 5 on real audio and the desktop); 21 bug specs fail on 4.1.0 and pass on 5.0.0.
+- New interface built with Qt (PySide6), replacing tkinter. Every v4 control and setting is kept.
+  Word-by-word highlighting (which v4 only did on Python 3.12 and older) is replaced by sentence highlighting
+  that works everywhere.
+  - Top bar with a Speak / Listen switch and icon buttons; editor card with live word and character counts;
+    collapsible speech queue panel; media-player style control bar; status bar with the clipboard controls.
+  - Crisp line icons that follow the theme, smooth switches, a live waveform, and sharp text on high-DPI screens.
+  - 12 themes: the 11 from v4 restyled, plus a new default, **Studio**. Every theme passes text contrast checks.
+  - Settings window with side navigation: Appearance (theme gallery), Speech, Listen, Clipboard, Shortcuts,
+    Mini mode and General.
+- New **mini mode**: a floating bar that stays on top of other apps and never takes focus.
+  - Mic button dictates into whatever app you are using; the text is typed at your cursor (or copied, if you prefer).
+  - Play button reads the text you have highlighted in any app, or the clipboard when nothing is highlighted
+    (also `Ctrl+Alt+S` and `--speak-clipboard`). The highlight is read through UI Automation, without touching the
+    clipboard; apps without it get a quick Ctrl+C with your clipboard put back, but terminals never do.
+  - Live waveform; voice, speed, volume and Pause popover; mouse wheel over the bar changes the volume;
+    snaps to screen edges.
+  - **Live captions** while dictating into another app: a bubble above the bar shows each word about half a
+    second after you say it. A fast **instant preview** recognizer (sherpa-onnx, a 73 MB English model downloaded
+    once) shows the words first, a little dimmer; Whisper checks them at every pause and corrects them in place;
+    the newest word is highlighted. The bubble uses larger text, is only as big as the words (one to three lines,
+    no empty space) and grows upward so the newest words stay above the bar. Its X or `Esc` cancels; nothing is
+    typed. The preview uses about 140 MB of memory while loaded (freed with the Whisper model). Turn it off in
+    Settings > Listen.
+  - **The text is typed right after you stop.** Measured on 7 test dictations (4 to 42 s, Whisper small, the same
+    PC), compared with the first 5.0 test build: first caption 2.6-4.4 s -> 0.6-0.9 s after you start talking; captions
+    update every 4.5 s -> every 0.3 s; stop to text 3.0-5.4 s -> 0.01-0.6 s when you pause before stopping
+    (under 0.1 s on 6 of the 7), and 3.1-5.6 s -> 0.5-1.2 s when you stop mid-sentence. Word errors: 2 in 664
+    words vs 1 before, the same misheard phrase ("in a" for "and a") in both builds.
+  - Dictation keeps full speed in the background: Windows 11 runs background apps in efficiency mode, which made
+    each Whisper pass 2.6 times slower (1.03 s -> 2.68 s) while you dictate into another app; TTSPython opts out.
+  - Long dictations are settled only at real pauses in the audio (never at Whisper's rough segment times, which
+    could cut a word), even in run-on speech without sentence breaks, and a short dictation is always
+    transcribed as a whole. A word said right before you press stop is always transcribed.
+- New **global hotkeys** (rebindable): Ctrl+Alt+D dictation, Ctrl+Alt+S speak clipboard, Ctrl+Alt+X stop,
+  Ctrl+Alt+Shift+M mini mode (other apps often take Ctrl+Alt+M). Keys another app already uses are shown in
+  Settings and the status bar; a pop-up says so once, the first time, not on every start, and TTSPython tries
+  again a few seconds after starting in case a key was only busy for a moment.
+- New **ready-to-run downloads**, no Python needed: `TTSPython.exe` for Windows (94 MB zip, 248 MB unpacked)
+  and a Linux build with a per-user installer (menu entry, `ttspython` command). Build them yourself with
+  `build.bat` / `build.sh`; each release on GitHub gets both, built and smoke-tested automatically.
+- New **system tray** icon, with an option to keep running in the tray when the window is closed.
+- New command-line options that also control an already running copy: `--mini`, `--show`, `--toggle-dictation`,
+  `--speak-clipboard`, `--stop`, `--pause`, `--quit`, `--settings PATH`.
+- Speech engine rebuilt: sentences are prepared one ahead and played by the app itself.
+  - **Pause and resume** speech (Ctrl+Space or the Play button).
+  - The **sentence being read is highlighted** and followed (word highlighting was turned off on Python 3.13 in v4).
+  - Speech starts quickly even for long documents: about 50 ms from Play to the first audio handed to the
+    sound device, measured on Windows with a SAPI5 voice.
+  - **Speed, volume and voice change while speaking.** Every step of a speed drag is heard as you drag (within
+    10 ms), mid-sentence, with the same pitch (before, it waited for the next group of sentences, often the whole text). Speed now goes
+    from 50% to 200% (shown in percent; 100% is the old 200 words per minute) in smooth steps instead of the
+    engine's few fixed rates. A new voice takes over at the word being read. The Settings sliders apply live too,
+    and Cancel puts them back.
+  - The **output device** setting now works and is remembered by name, so it survives reconnecting devices.
+- **More voices.** The Windows 11 voices that older apps cannot see are listed too (on the test PC: Mark), and
+  **Get more voices** in Settings > Speech downloads natural-sounding **Piper** voices (178 voices in 53 languages,
+  about 60 MB each, checked against their published checksums). Piper runs as its own program, downloaded with
+  the first voice, so TTSPython stays MIT-licensed. The voice picker moved from the control bar to Settings and
+  the mini bar's popover.
+- Dictation: pick the **Whisper model** in Settings and a **language** (English by default, Auto-detect, or 15
+  common languages); the model loads while you talk; a live input level meter in Settings.
+- **Real MP3 export** (128 kbps) via `lameenc`; exports show progress, can be cancelled, and never leave half-written files.
+- Find and replace is now an inline bar with previous/next (Enter / Shift+Enter), wrap-around and a match count.
+- New: **Speak from here** (`Ctrl+Alt+Enter`, or right-click in the editor), **New** (`Ctrl+N`), recent files under
+  the Open button, drop text files on the editor (opens) or the queue (adds), Settings with `Ctrl+,`, reading time
+  next to the word count, the file name and an unsaved mark in the window title.
+- The speech queue is kept between sessions; `Enter` plays the selected item; right-click for Play from here, Move
+  to top, Copy to the editor and Remove; each item shows its listening time.
+- Export uses only the selected text when there is a selection, remembers the folder and format, and offers
+  **Open folder** when done. It writes as it renders, so a long book no longer sits in memory.
+- Unsaved editor text is also kept every 30 seconds, so it survives a crash.
+- The tray menu adds Pause or resume and Settings; its tooltip says what is happening and a red dot shows while
+  dictation records.
+- Settings: **Save** and **Cancel** both close (Cancel undoes previews); closing with unsaved changes asks. The
+  Output, Model and Mic labels in the main window open the matching Settings page. Listen lists the downloaded
+  Whisper models and the live preview model with their size and a Delete button.
+- Nothing is cut off any more at small window sizes or 150% display scaling: an automatic check of every window
+  at 3 window sizes, 3 Settings sizes and 2 scaling levels went from 30 problems to 0 (Settings pages are now
+  narrower than the dialog, rows stack when needed, long names end in "..." instead of being cut mid-letter).
+- `Ctrl+Enter` now works like the Play button: play, pause, resume.
+- Output and microphone lists include every device from every audio system (for example WASAPI-only devices).
+- Text files saved as UTF-16 ("Unicode" in Notepad) now open correctly instead of as garbled text.
+- Closing or quitting with unsaved editor text asks first. If text cannot be stored in the file's original
+  encoding, it is saved as UTF-8 and you are told.
+- Unsaved editor text is kept when Windows logs off or shuts down (no prompt is possible then) and put back
+  the next time TTSPython starts.
+- The first dictation with a new Whisper model shows its download ("Downloading the small model... 120 of
+  486 MB"), in the window and next to the mini bar. Before, it sat on "Transcribing" with no word for the whole
+  download (58 s for Small in testing), which looked like a hang. Pressing the mic during the download says so.
+  The notice by the mini bar is updated in place as the download goes (one notice instead of a new one 5 times a
+  second) and is drawn in the theme's colors like the caption bubble. The live preview's own download is shown
+  only in the status bar, so it never covers "Listening..." or pops up after you stop; only a failure is announced.
+- Downloaded models load straight from disk, skipping an online check on every load (about 1.0 s instead of
+  1.1 to 1.7 s for Small) and working fully offline.
+- If the dictation model cannot load (for example offline on first use), you are told once; the recording no
+  longer waits through the same failing load a second time. The next recording tries again.
+- Play queue starts at the selected item (or the top); double-click an item to play from it; pressing it while
+  something is speaking switches to the queue instead of refusing.
+- Performance Mode is now off by default for new installs (your v4 setting is kept when imported).
+- Python 3.8 is no longer supported (Qt needs 3.9 or newer).
+- Voice, speed, volume, queue loop and panel layout are remembered between sessions.
+- Settings moved to `%APPDATA%\TTSPython\settings.json` (Linux: `~/.config/ttspython/settings.json`); your
+  v4 `tts_settings.json` is imported on first start and left untouched.
+- Removed the Pillow dependency; added `PySide6-Essentials`, `lameenc`, `comtypes` (Windows) and `pynput` (Linux).
+  Linux no longer needs `aplay`/`alsa-utils` or `tk`, but now needs `xcb-util-cursor`.
+- Fixed in a second full review (each has a test that fails before the fix):
+  - An interrupted model download broke dictation until the download folder was deleted by hand; it now resumes.
+  - Microphones that only run at their own rate (WASAPI, some Linux devices) could not record.
+  - After Settings > Test and Save, speech could stay on the device that was tested.
+  - On Linux, a second user on the same PC could not start the app.
+  - A saved voice that was uninstalled was silently replaced, and Export used a different voice than speech.
+  - Typing a new global hotkey in Settings fired the old one instead of recording it.
+  - A speech engine that failed at start (for example espeak-ng missing) gave no message until Play.
+  - The Large v3 Turbo model needed a newer faster-whisper than the app asked for.
+  - Speakers or microphones plugged in after start were not listed (now on opening Settings, or Refresh).
+  - Restarting the queue while it played showed "Queue stopped".
+  - Stopping dictation with Alt or Shift still held could paste as Ctrl+Alt+V (Paste Special in Office).
+  - On Wayland, the paste key setting was ignored and the clipboard was not restored.
+  - A slow app that copied late could leave the selection on your clipboard after Play.
+  - An export failure opened a dialog over the app you were working in.
+  - A microphone that sends only silence (blocked in Windows privacy settings) now says so instead of
+    "No speech detected"; device errors are explained in plain words.
+  - Clear kept the file name, so Ctrl+S could save an empty editor over the file.
+- Smaller and lighter: the Windows app no longer bundles unused Qt plugins, PortAudio builds for other CPUs, or an
+  OpenSSL copy picked up from another program; the level waveform stops redrawing while silent or hidden (21
+  redraws per silent second before, at most 2 now); Whisper uses up to 8 threads (22% faster on a 16-thread PC);
+  Settings opens without rescanning audio devices until the Speech or Listen page is shown.
+- Fixed (each has a test that fails on v4.1.0 and passes now):
+  - Auto-Queue replayed the whole queue over and over; queued items now play once.
+  - Stop followed quickly by Speak could run two voices at the same time.
+  - Clipboard speech did not mark the app as busy, so a second voice could start over it.
+  - Turning the clipboard monitor off and on quickly stacked extra polling loops (22 checks in 2 s instead of 2).
+  - Highlighting during Speak Selected pointed at the wrong place.
+  - Changing a shortcut left the old key active; a missing shortcut in the settings file crashed startup.
+  - The Start Recording button kept the stop icon and a doubled emoji after recording.
+  - Find ignored the Match case and Regular expression options, and regex matches were selected at the wrong length.
+  - "MP3" export saved a WAV file with an .mp3 name.
+  - The output device setting was saved but never used.
+  - Changing the Whisper model had no effect until restart.
+  - Removing the item that was playing at the end of the queue restarted the queue from the top.
+  - Find and Replace could be opened several times at once.
+  - Closing the window while speaking did not stop speech.
+  - Replace All treated backslashes in the replacement as escape codes (for example `\n` became a new line).
+  - Saving added a newline to the end of the file every time.
+  - Replace All took two undo steps, and the first left the editor empty.
+  - Voice, speed and volume were not saved.
+  - The microphone setting pointed at a device number, so it could switch to the wrong mic after devices changed.
+
 ## Version 4.1.0 - 2026-07-24
 - Linux / Arch Linux support (cross-platform TTS)
   - `pyttsx3` now initializes with the `espeak` driver on Linux/macOS (SAPI5 remains the Windows default)
@@ -250,16 +403,14 @@
 
 ---
 
-## Statistics
+## Statistics (5.0.0)
 
-- **Total Lines of Code**: 1900+
-- **Total Features**: 20+
-- **Hotkeys**: 10 customizable
-- **Themes**: 11 presets (Dark, Twilight, Light, High Contrast, Forest, New Vegas, Spiral, Poly, Sunset, Paper, Graphite)
-- **Modes**: TTS (SAPI5) + STT (offline faster-whisper)
-- **Queue Modes**: File, Text, Clipboard
-- **Platform**: Windows (SAPI5)
-- **Python Compatibility**: 3.8 - 3.13
+- **Shortcuts**: 13 in-window plus 6 global hotkeys, all customizable
+- **Themes**: 12 presets (Studio, Dark, Twilight, Light, High Contrast, Forest, New Vegas, Spiral, Poly, Sunset, Paper, Graphite)
+- **Modes**: Speak (SAPI5 on Windows, espeak-ng on Linux) + Listen (offline faster-whisper, 16 languages plus Auto-detect)
+- **Queue sources**: Text, File, Clipboard
+- **Platforms**: Windows 10/11 and Linux
+- **Python**: 3.9 or newer
 
 ---
 
@@ -268,11 +419,7 @@
 Potential future enhancements:
 - PDF and Word document support
 - Pronunciation dictionary
-- Pause/Resume functionality
 - Recent files menu
-- Text statistics
-- Auto-scroll during speech
-- Multi-language support
 
 ---
 
@@ -282,5 +429,5 @@ For questions or suggestions, check the documentation:
 - `README.md` - Overview and setup
 - `FEATURE_GUIDE.md` - Complete feature documentation
 - `QUICK_REFERENCE.md` - Quick lookup guide
-- `ADD_VOICES_GUIDE.md` - Installing more SAPI5 voices
+- `ADD_VOICES_GUIDE.md` - Installing more voices
 

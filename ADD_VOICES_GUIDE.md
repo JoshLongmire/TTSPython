@@ -1,178 +1,79 @@
-# How to Add More Voices to Your TTS Application
+# Adding Voices to TTSPython
 
-## Current Situation
+TTSPython speaks with two kinds of voices:
 
-Your TTS app uses **Windows SAPI5 voices**. It automatically detects all voices installed on your system.
+- **Natural voices (Piper)**: neural voices that sound much closer to a person. They run offline on your
+  computer, on Windows and Linux. You download the ones you want from inside the app.
+- **System voices**: the voices your operating system already has. On **Windows** these are the SAPI5 voices
+  and the Windows 10/11 speech voices (for example David, Zira and Mark). On **Linux** they come from **espeak-ng**.
 
-By default, Windows 10/11 comes with 2-3 voices:
-- **David** (Male, English US)
-- **Zira** (Female, English US)
-- **Mark** (Male, English US)
+Pick the voice in **Settings > Speech > Voice**, or in the mini bar's popover (chevron or right-click).
 
-## 🎤 Add More Voices
+## Natural voices (Piper)
 
-### Method 1: Free Windows Voices (Easiest)
+1. Open **Settings > Speech** and press **Get more voices**.
+2. Choose a **language**. Each voice is listed with its country, quality (small, medium or best) and download size.
+3. Not sure which one? **Hear samples online** opens the official sample page, where you can listen to each voice.
+4. Select a voice and press **Download** (or double-click it). Most voices are about 60 MB; the "best" ones about
+   115 MB. The first voice also downloads the Piper program (about 23 MB).
+5. Press **Use this voice**. It is used for speech and export right away, and it shows up in the voice lists.
 
-**Step 1: Open Windows Settings**
+Good English voices to start with: **Lessac** (United States, medium), **Amy** (United States, medium),
+**Ryan** (United States, high), **Alan** and **Cori** (United Kingdom).
+
+Things to know:
+- There are 178 voices in 53 languages. Each one is downloaded once; after that it works without internet.
+- Downloads are checked against their published checksums. A broken or cancelled download leaves nothing behind.
+- Speed works the same as with system voices (50% to 200%), and changes while it speaks.
+- To remove a voice, select it in **Get more voices** and press **Remove** (switch to another voice first).
+- Voices and the Piper program are stored in `%LOCALAPPDATA%\TTSPython` (Windows) or `~/.local/share/ttspython` (Linux).
+- Piper is the official program from the [Piper project](https://github.com/rhasspy/piper) (MIT license, with
+  espeak-ng under GPL-3.0). TTSPython downloads it and runs it as a separate program. Each voice has its own
+  license, listed in its model card on [Hugging Face](https://huggingface.co/rhasspy/piper-voices); some are for
+  non-commercial use only, so check before using one for a commercial project.
+- Piper builds exist for Windows (64-bit), Linux on x86-64 and Linux on ARM64.
+
+## Windows voices
+
+Windows 10/11 comes with a few English voices (David, Zira and often Mark). TTSPython lists both the classic
+SAPI5 voices and the newer Windows speech voices, so a voice Windows installed in only one of those places still
+appears.
+
+To add more:
+1. In **Get more voices**, press **Open Windows speech settings** (or open **Settings > Time & language >
+   Speech** yourself).
+2. Press **Add voices** and pick a language (for example English (United Kingdom) for Hazel and George).
+3. Back in TTSPython, press **Refresh** next to the voice list in **Settings > Speech**. No restart needed.
+
+Third-party SAPI5 voices (for example from CereProc or Acapela) also appear in the list once installed.
+
+## Linux voices (espeak-ng)
+
+TTSPython reads the voices espeak-ng provides. Install espeak-ng and its language data with your package
+manager, then press **Refresh**:
+```bash
+sudo pacman -S espeak-ng        # Arch
+sudo apt install espeak-ng      # Debian / Ubuntu
 ```
-Windows Key → Settings → Time & Language → Speech
+Piper voices (above) sound much more natural and work on Linux too.
+
+## Check which voices are installed
+
+```bash
+python check_voices.py
 ```
+lists the system voices TTSPython can use (the same engine as the app). Downloaded Piper voices are listed in
+**Get more voices** as "Installed".
 
-**Step 2: Add Speech Voices**
-1. Click "Add voices" or "Manage voices"
-2. Browse available voices by language
-3. Download the ones you want
+## Troubleshooting
 
-**Available Languages Include:**
-- English (UK, US, Australia, India)
-- Spanish, French, German, Italian
-- Chinese, Japanese, Korean
-- Portuguese, Russian, Arabic
-- And many more!
+**A new Windows voice does not appear**: press **Refresh** in Settings > Speech. Voices added through
+Windows language packs can need a sign-out and sign-in before Windows reports them.
 
-**Step 3: Restart Your TTS App**
-The new voices will appear in the Voice dropdown automatically!
+**A Piper download fails**: check the internet connection and try again. Downloads come from GitHub (the
+program) and Hugging Face (the voices); a company firewall may block them.
 
----
+**"There is no Piper build for this computer"**: Piper is available for 64-bit Windows and for Linux on x86-64
+and ARM64. On other systems, use the system voices.
 
-### Method 2: Third-Party SAPI5 Voices
-
-**Free Options:**
-1. **eSpeak** - Open source, many languages
-   - Download: http://espeak.sourceforge.net/
-   - Robotic but functional
-
-2. **NVDA Voices** - Screen reader voices
-   - Some can be used with SAPI5
-
-**Paid Options (High Quality):**
-1. **CereProc** - Natural-sounding voices
-   - Website: https://www.cereproc.com/
-   - Price: ~$30-50 per voice
-
-2. **Ivona Voices** (now Amazon Polly)
-   - Very natural speech
-   - Price: ~$40-60 per voice
-
-3. **NaturalReader** - Commercial voices
-   - Website: https://www.naturalreaders.com/
-   - Price: Subscription-based
-
-4. **Acapela** - Professional voices
-   - Website: https://www.acapela-group.com/
-   - Price: ~$50+ per voice
-
----
-
-## 🔄 How to Refresh the Voice List (Without Restarting)
-
-The app already has built-in voice controls next to the Voice dropdown:
-
-- **Refresh button (🔄)**: Re-scans your system for installed SAPI5 voices and updates the dropdown immediately — no restart needed.
-- **"🎙️ Voices" button**: Opens Windows Speech settings (`ms-settings:speech`) so you can install new voices, then click **Refresh** to pick them up.
-
-So the workflow is: install a voice in Windows → click the **🎙️ Voices** button (or open Speech settings yourself) → click **Refresh** → select the new voice from the dropdown.
-
----
-
-## 📊 Check Currently Available Voices
-
-Run this Python script to see what voices you have:
-
-```python
-import pyttsx3
-
-engine = pyttsx3.init()
-voices = engine.getProperty('voices')
-
-print(f"\n🎤 You have {len(voices)} voice(s) installed:\n")
-for i, voice in enumerate(voices, 1):
-    print(f"{i}. {voice.name}")
-    print(f"   ID: {voice.id}")
-    print(f"   Languages: {voice.languages}")
-    print()
-```
-
----
-
-## 🌍 Language-Specific Voice Recommendations
-
-### English
-- **UK**: Hazel (Female), George (Male) - Available in Windows
-- **US**: Zira, David - Default
-- **Australia**: Catherine - Windows add-on
-- **India**: Heera, Ravi - Windows add-on
-
-### Spanish
-- **Spain**: Helena (Female), Pablo (Male)
-- **Mexico**: Sabina (Female)
-
-### French
-- **France**: Hortense (Female), Paul (Male)
-- **Canada**: Caroline (Female)
-
-### German
-- **Germany**: Hedda (Female), Stefan (Male)
-
-### Asian Languages
-- **Chinese (Mandarin)**: Huihui (Female), Kangkang (Male)
-- **Japanese**: Haruka (Female), Ichiro (Male)
-- **Korean**: Heami (Female)
-
----
-
-## 💡 Pro Tips
-
-1. **Test Before Using**: Some free voices sound robotic
-2. **Language Packs**: Install Windows language packs for best results
-3. **Neural Voices**: Worth the investment for professional use
-4. **Storage**: Each voice is ~50-200 MB
-5. **License**: Check license for commercial use
-
----
-
-## 🎯 Quick Start: Add a New Windows Voice
-
-**Fastest way to get more voices:**
-
-1. Press `Windows + I` (Settings)
-2. Go to: **Time & Language** → **Language & region**
-3. Click "Add a language"
-4. Choose a language (e.g., English (United Kingdom))
-5. Download the language pack
-6. Go to: **Time & Language** → **Speech**
-7. The new voices appear in Windows!
-8. In the app, click **🎙️ Voices** (or open Speech settings), then click **Refresh**
-9. New voices are in the dropdown! 🎉
-
----
-
-## ❓ Troubleshooting
-
-**Problem**: New voice doesn't appear in app
-- **Solution**: Click the **Refresh** button next to the Voice dropdown. If it still doesn't appear, fully restart the app.
-
-**Problem**: Voice sounds robotic
-- **Solution**: Try premium voices or neural voices from Azure
-
-**Problem**: Can't find voice settings in Windows
-- **Solution**: Windows 10: Settings → Time & Language → Speech
-- **Solution**: Windows 11: Settings → Accessibility → Speech
-
-**Problem**: Want to preview voices before downloading
-- **Solution**: Use Windows Speech settings - it has a preview button
-
----
-
-## 🚀 Next Steps
-
-1. **Add 2-3 free Windows voices** (5 minutes)
-2. **Click the "🎙️ Voices" button** in the app to open Windows Speech settings (or open it yourself)
-3. **Install the voices**, then click **Refresh** in the app
-4. **Try your TTS app with new voices** 
-5. **If you love it, consider premium voices**
-
----
-
-**Your TTS app will automatically detect and list ALL installed SAPI5 voices!** 🎤✨
-
+**A voice sounds robotic**: try a Piper voice in "medium" or "best" quality.
