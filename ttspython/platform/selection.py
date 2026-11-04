@@ -106,10 +106,6 @@ class SelectionGrabber(QObject):
         self._uia_done.connect(self._on_uia)
 
     @property
-    def busy(self):
-        return self._pending is not None
-
-    @property
     def win(self):
         if self._win is None:
             from . import winapi

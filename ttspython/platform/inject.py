@@ -72,12 +72,16 @@ class TextInjector(QObject):
         if self._busy:
             self.copy_only(text, "Copied to clipboard (still pasting the last dictation).")
             return
-        if IS_WINDOWS:
-            self._inject_windows(text, target)
-        elif session_type() == "wayland":
-            self._inject_wayland(text)
-        else:
-            self._inject_x11(text)
+        try:
+            if IS_WINDOWS:
+                self._inject_windows(text, target)
+            elif session_type() == "wayland":
+                self._inject_wayland(text)
+            else:
+                self._inject_x11(text)
+        except Exception as exc:  # never stay "busy": every later dictation would only be copied
+            self._busy = False
+            self.copy_only(text, f"Could not paste ({exc}), so the text was copied. Press Ctrl+V to paste.")
 
     # --- Windows ----------------------------------------------------------------------
     def _inject_windows(self, text, target):
@@ -108,7 +112,10 @@ class TextInjector(QObject):
                 self._busy = False
                 self.finished.emit(False, "Keys were still held, so the text was copied. Press Ctrl+V to paste.")
                 return
-            sent = winapi.send_paste(self.keystroke)
+            try:
+                sent = winapi.send_paste(self.keystroke)
+            except OSError:
+                sent = False
             QTimer.singleShot(RESTORE_DELAY_MS, lambda: restore(sent))
 
         def restore(sent):

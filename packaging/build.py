@@ -9,11 +9,13 @@ Usage: python packaging/build.py [--no-archive]
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import platform
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -27,9 +29,24 @@ def folder_size(path):
     return sum(os.path.getsize(os.path.join(d, f)) for d, _, files in os.walk(path) for f in files)
 
 
+def self_test(app_dir):
+    """Start the built app with temporary settings and data; it reports what it could not load, then quits."""
+    with tempfile.TemporaryDirectory(prefix="ttspython-build-check-") as tmp:
+        report_path = os.path.join(tmp, "report.json")
+        env = dict(os.environ, TTSPYTHON_SELFTEST=report_path, TTSPYTHON_SETTINGS=os.path.join(tmp, "settings.json"),
+                   TTSPYTHON_DATA=os.path.join(tmp, "data"), HF_HOME=os.path.join(tmp, "hf"), QT_QPA_PLATFORM="offscreen")
+        subprocess.run([os.path.join(app_dir, APP_NAME)], env=env, check=True, timeout=180)
+        with open(report_path, encoding="utf-8") as f:
+            problems = json.load(f)["problems"]
+    if problems:
+        sys.exit("The built app's self-test failed:\n" + "\n".join(problems))
+    print("Self-test: no problems")
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--no-archive", action="store_true", help="Skip the .zip / .tar.gz")
+    parser.add_argument("--check", action="store_true", help="Run the built app's self-test; fail if it finds a problem")
     args = parser.parse_args(argv)
     windows = sys.platform == "win32"
     dist = os.path.join(ROOT, "dist")
@@ -53,6 +70,8 @@ def main(argv=None):
             os.chmod(target, 0o755)
 
     print(f"\nBuilt {app_dir} ({folder_size(app_dir) / 1e6:.0f} MB) in {time.perf_counter() - t0:.0f} s")
+    if args.check:
+        self_test(app_dir)
     if args.no_archive:
         return 0
     arch = "x64" if windows else platform.machine() or "x86_64"

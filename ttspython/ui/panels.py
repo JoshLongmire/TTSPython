@@ -5,13 +5,13 @@ from PySide6.QtCore import QRect, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFontMetrics, QPainter
 from PySide6.QtWidgets import (
     QAbstractItemView, QFrame, QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QProgressBar,
-    QSizePolicy, QSlider, QStyle, QStyledItemDelegate, QToolButton, QVBoxLayout, QWidget,
+    QSizePolicy, QStyle, QStyledItemDelegate, QToolButton, QVBoxLayout, QWidget,
 )
 
 from ..core.settings import RATE_MAX, RATE_MIN, percent_wpm, speed_percent
 from . import icons
 from .editor import reading_time
-from .widgets import ElidedLabel, Waveform, action_button, dropped_text_files
+from .widgets import ElidedLabel, Slider, TextFileDropMixin, Waveform, action_button, dropped_text_files
 
 KIND_ICONS = {"text": "file_text", "file": "file_text", "clipboard": "clipboard"}
 
@@ -78,7 +78,7 @@ class QueueDelegate(QStyledItemDelegate):
         p.restore()
 
 
-class QueueList(QListWidget):
+class QueueList(TextFileDropMixin, QListWidget):
     reordered = Signal(list)
     delete_pressed = Signal()
     files_dropped = Signal(list)
@@ -96,27 +96,11 @@ class QueueList(QListWidget):
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)  # long names are shortened instead
         self.setSpacing(1)
 
-    # Text files dropped from outside are added; items dragged inside are reordered.
-    def dragEnterEvent(self, event):  # noqa: N802
-        if dropped_text_files(event.mimeData()):
-            event.acceptProposedAction()
-            return
-        super().dragEnterEvent(event)
-
-    def dragMoveEvent(self, event):  # noqa: N802
-        if dropped_text_files(event.mimeData()):
-            event.acceptProposedAction()
-            return
-        super().dragMoveEvent(event)
-
     def dropEvent(self, event):  # noqa: N802
         files = dropped_text_files(event.mimeData())
-        if files:
-            event.acceptProposedAction()
-            self.files_dropped.emit(files)
-            return
-        super().dropEvent(event)
-        self.reordered.emit([self.item(i).data(ID_ROLE) for i in range(self.count())])
+        super().dropEvent(event)  # files are added; items dragged inside are reordered
+        if not files:
+            self.reordered.emit([self.item(i).data(ID_ROLE) for i in range(self.count())])
 
     def contextMenuEvent(self, event):  # noqa: N802
         item = self.itemAt(event.pos())
@@ -131,11 +115,14 @@ class QueueList(QListWidget):
         super().keyPressEvent(event)
 
 
-class QueuePanel(QFrame):
+class QueuePanel(TextFileDropMixin, QFrame):
+    files_dropped = Signal(list)  # also when the empty queue's message is showing instead of the list
+
     def __init__(self, actions, parent=None):
         super().__init__(parent)
         self.setObjectName("Card")
         self.setMinimumWidth(250)
+        self.setAcceptDrops(True)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(10, 10, 10, 10)
         lay.setSpacing(8)
@@ -146,8 +133,9 @@ class QueuePanel(QFrame):
         title.setObjectName("CardTitle")
         self.badge = QLabel("0")
         self.badge.setObjectName("Badge")
+        self.badge.setAlignment(Qt.AlignCenter)
         header.addWidget(title)
-        header.addWidget(self.badge)
+        header.addWidget(self.badge, 0, Qt.AlignVCenter)
         header.addStretch(1)
         self.loop_btn = action_button(actions["queue_loop"], size=16)
         header.addWidget(self.loop_btn)
@@ -155,38 +143,33 @@ class QueuePanel(QFrame):
         lay.addLayout(header)
 
         self.list = QueueList()
+        self.files_dropped.connect(self.list.files_dropped)
         lay.addWidget(self.list, 1)
 
-        self.empty = QLabel("Add the editor text, files or clipboard\nitems to read them back to back.")
+        self.empty = QLabel("Add the editor text, files or clipboard items to read them back to back, "
+                            "or drop text files here.")
         self.empty.setAlignment(Qt.AlignCenter)
         self.empty.setObjectName("Muted")
         self.empty.setWordWrap(True)
         lay.addWidget(self.empty, 1)
 
-        row1 = QHBoxLayout()
-        row1.setSpacing(6)
+        add_row = QHBoxLayout()
+        add_row.setSpacing(6)
+        for key in ("queue_add_text", "queue_add_files"):
+            add = action_button(actions[key], show_text=True, size=16)
+            add.setProperty("variant", None)
+            add.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            add_row.addWidget(add, 1)
+        play_row = QHBoxLayout()
+        play_row.setSpacing(2)
         play = action_button(actions["queue_play"], variant="primary", show_text=True, size=16)
         play.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        row1.addWidget(play, 1)
-        add_text = action_button(actions["queue_add_text"], show_text=True, size=16)
-        add_text.setProperty("variant", None)
-        add_files = action_button(actions["queue_add_files"], show_text=True, size=16)
-        add_files.setProperty("variant", None)
-        row2 = QHBoxLayout()
-        row2.setSpacing(6)
-        row2.addWidget(add_text, 1)
-        row2.addWidget(add_files, 1)
-        for w in (add_text, add_files):
-            w.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        row3 = QHBoxLayout()
-        row3.setSpacing(4)
-        row3.addWidget(action_button(actions["queue_up"], size=16))
-        row3.addWidget(action_button(actions["queue_down"], size=16))
-        row3.addStretch(1)
-        row3.addWidget(action_button(actions["queue_remove"], show_text=True, size=16))
-        lay.addLayout(row3)
-        lay.addLayout(row2)
-        lay.addLayout(row1)
+        play_row.addWidget(play, 1)
+        play_row.addSpacing(4)
+        for key in ("queue_up", "queue_down", "queue_remove"):
+            play_row.addWidget(action_button(actions[key], size=16))
+        lay.addLayout(add_row)
+        lay.addLayout(play_row)
         self._pending = None
         self._retry = QTimer(self)
         self._retry.setSingleShot(True)
@@ -221,6 +204,7 @@ class QueuePanel(QFrame):
         self.list.verticalScrollBar().setValue(scroll)
         self.badge.setText(str(len(items)))
         has = bool(items)
+        self.badge.setVisible(has)
         self.list.setVisible(has)
         self.empty.setVisible(not has)
 
@@ -242,6 +226,7 @@ class QueuePanel(QFrame):
 class TransportBar(QFrame):
     """Media-player style controls for speech."""
 
+    WAVE_WIDTH = 860  # narrower windows keep the room for the progress text
     rate_changed = Signal(int)
     volume_changed = Signal(float)
 
@@ -249,7 +234,7 @@ class TransportBar(QFrame):
         super().__init__(parent)
         self.setObjectName("Transport")
         lay = QHBoxLayout(self)
-        lay.setContentsMargins(18, 10, 18, 10)
+        lay.setContentsMargins(16, 8, 16, 8)
         lay.setSpacing(10)
 
         self.play_btn = QToolButton()
@@ -272,9 +257,9 @@ class TransportBar(QFrame):
         top = QHBoxLayout()
         self.now = QLabel("Ready")
         self.now.setObjectName("NowPlaying")
-        self.wave = Waveform(bars=28)
-        self.wave.setFixedHeight(18)
-        self.wave.setMaximumWidth(150)
+        self.wave = Waveform(bars=24)
+        self.wave.setFixedSize(120, 16)
+        self.wave.hide()
         top.addWidget(self.now, 1)
         top.addWidget(self.wave)
         self.progress = QProgressBar()
@@ -292,7 +277,8 @@ class TransportBar(QFrame):
         speed_icon = QLabel()
         speed_icon.setPixmap(icons.pixmap("gauge", icons.color("muted"), 16, 2.0))
         self._speed_icon = speed_icon
-        self.rate = QSlider(Qt.Horizontal)
+        self.rate = Slider()
+        self.rate.setAccessibleName("Speed")
         self.rate.setRange(speed_percent(RATE_MIN), speed_percent(RATE_MAX))
         self.rate.setSingleStep(5)
         self.rate.setPageStep(10)
@@ -301,7 +287,8 @@ class TransportBar(QFrame):
         self.rate.setToolTip("Speed (100% is normal; changes are heard right away)")
         self.rate_label = QLabel("100%")
         self.rate_label.setObjectName("Muted")
-        self.rate_label.setMinimumWidth(QFontMetrics(self.rate_label.font()).horizontalAdvance("200%") + 4)
+        percent_width = QFontMetrics(self.rate_label.font()).horizontalAdvance("200%") + 4
+        self.rate_label.setMinimumWidth(percent_width)
         self.rate.valueChanged.connect(self._rate_moved)
         lay.addWidget(speed_icon)
         lay.addWidget(self.rate)
@@ -310,25 +297,33 @@ class TransportBar(QFrame):
 
         vol_icon = QLabel()
         self._vol_icon = vol_icon
-        self.volume = QSlider(Qt.Horizontal)
+        self.volume = Slider()
+        self.volume.setAccessibleName("Volume")
         self.volume.setRange(10, 100)
         self.volume.setMinimumWidth(60)
         self.volume.setMaximumWidth(110)
         self.volume.setToolTip("Volume")
+        self.volume_label = QLabel("100%")
+        self.volume_label.setObjectName("Muted")
+        self.volume_label.setMinimumWidth(percent_width)
         self.volume.valueChanged.connect(self._volume_moved)
         lay.addWidget(vol_icon)
         lay.addWidget(self.volume)
+        lay.addWidget(self.volume_label)
         lay.addSpacing(6)
         lay.addWidget(action_button(actions["toggle_queue"], size=18))
         self.refresh_icons()
 
+    def set_level_source(self, source):
+        """The waveform shows while speech plays, next to the progress text."""
+        self.wave.set_source(source)
+        self._fit_wave()
+
+    def _fit_wave(self):
+        self.wave.setVisible(self.wave.active and self.width() >= self.WAVE_WIDTH)
+
     def resizeEvent(self, event):  # noqa: N802
-        # Compact layout on narrow windows: drop the progress details and the speed label. The
-        # progress area itself stays as the flexible gap, so the controls keep their places.
-        compact = event.size().width() < 900
-        for w in (self.now, self.wave, self.progress):
-            w.setVisible(not compact)
-        self.rate_label.setVisible(not compact)
+        self._fit_wave()
         super().resizeEvent(event)
 
     def refresh_icons(self):
@@ -342,6 +337,7 @@ class TransportBar(QFrame):
         self.rate_changed.emit(percent_wpm(percent))
 
     def _volume_moved(self, value):
+        self.volume_label.setText(f"{value}%")
         self.refresh_icons()
         self.volume_changed.emit(value / 100.0)
 
@@ -351,6 +347,7 @@ class TransportBar(QFrame):
         self.rate.setValue(speed_percent(rate))
         self.rate_label.setText(f"{speed_percent(rate)}%")
         self.volume.setValue(int(round(volume * 100)))
+        self.volume_label.setText(f"{self.volume.value()}%")
         self.rate.blockSignals(False)
         self.volume.blockSignals(False)
         self.refresh_icons()
@@ -371,18 +368,18 @@ class ListenPanel(QFrame):
         super().__init__(parent)
         self.setObjectName("Card")
         lay = QHBoxLayout(self)
-        lay.setContentsMargins(18, 14, 18, 14)
-        lay.setSpacing(16)
+        lay.setContentsMargins(14, 8, 14, 8)
+        lay.setSpacing(14)
         self.record = QToolButton()
         self.record.setDefaultAction(record_action)
         self.record.setProperty("variant", "record")
-        self.record.setFixedSize(60, 60)
-        self.record.setIconSize(QSize(26, 26))
+        self.record.setFixedSize(48, 48)
+        self.record.setIconSize(QSize(22, 22))
         self.record.setCursor(Qt.PointingHandCursor)
         lay.addWidget(self.record)
 
         col = QVBoxLayout()
-        col.setSpacing(4)
+        col.setSpacing(1)
         self.title = QLabel("Ready to dictate")
         self.title.setObjectName("CardTitle")
         self.status = QLabel("Press the button or Ctrl+Alt+D, speak, then press again. Text appears in the editor.")
@@ -393,11 +390,11 @@ class ListenPanel(QFrame):
         lay.addLayout(col, 1)
         self.wave = Waveform(bars=32)
         self.wave.color_role = "danger"
-        self.wave.setFixedSize(200, 36)
+        self.wave.setFixedSize(150, 32)
         lay.addWidget(self.wave)
 
         chips = QVBoxLayout()
-        chips.setSpacing(4)
+        chips.setSpacing(2)
         self.model_chip = ElidedLabel("Model: small")
         self.model_chip.setObjectName("Muted")
         self.mic_chip = ElidedLabel("Mic: System default")

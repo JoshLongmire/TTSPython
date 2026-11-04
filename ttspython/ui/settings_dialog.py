@@ -6,18 +6,21 @@ import copy
 from PySide6.QtCore import QEvent, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QKeySequence, QPainter
 from PySide6.QtWidgets import (
-    QButtonGroup, QComboBox, QDialog, QFrame, QGridLayout, QHBoxLayout, QKeySequenceEdit, QLabel,
-    QListWidget, QListWidgetItem, QMessageBox, QPushButton, QRadioButton, QScrollArea, QSlider,
+    QButtonGroup, QComboBox, QDialog, QFrame, QGridLayout, QHBoxLayout, QKeySequenceEdit, QLabel, QLineEdit,
+    QListWidget, QListWidgetItem, QMessageBox, QPushButton, QRadioButton, QScrollArea,
     QSpinBox, QStackedWidget, QVBoxLayout, QWidget,
 )
 
 from ..core import keys, settings as settings_mod
+from ..core.stt import preview as preview_mod
 from ..core.theme import THEME_PRESETS, derive_tokens
 from . import icons
-from ..core.stt import preview as preview_mod
-from .widgets import ElidedLabel, ElidingComboBox, Segmented, ToggleSwitch, Waveform, tool_button, voice_label
+from .widgets import (
+    ElidedLabel, ElidingComboBox, Segmented, Slider, ToggleSwitch, Waveform, mute_clear_button, tool_button, voice_label,
+)
 
-def _shrinkable(chars=14):
+
+def _shrinkable(chars=22):
     """A combo box that shortens long names ("...") instead of widening the page."""
     combo = ElidingComboBox(chars=chars)
     combo.setMaximumWidth(340)
@@ -46,6 +49,14 @@ class ThemeCard(QFrame):
         self.setFixedSize(118, 100)
         self.tokens = derive_tokens(THEME_PRESETS[key])
         self.setToolTip(self.tokens["name"])
+        self.setAccessibleName(f"{self.tokens['name']} theme")
+        self.setFocusPolicy(Qt.StrongFocus)
+
+    def keyPressEvent(self, event):  # noqa: N802
+        if event.key() in (Qt.Key_Space, Qt.Key_Return, Qt.Key_Enter):
+            self.clicked.emit(self.key)
+            return
+        super().keyPressEvent(event)
 
     def set_selected(self, selected):
         self.setProperty("selected", "true" if selected else "false")
@@ -82,11 +93,12 @@ class SettingRow(QFrame):
 
     STACK_BELOW = 560
 
-    def __init__(self, title, control, help_text="", parent=None):
+    def __init__(self, title, control, help_text="", parent=None, compact=False):
         super().__init__(parent)
         self.setObjectName("SettingRow")
         self._grid = QGridLayout(self)
-        self._grid.setContentsMargins(0, 10, 0, 10)
+        margin = 2 if compact else 10
+        self._grid.setContentsMargins(0, margin, 0, margin)
         self._grid.setHorizontalSpacing(16)
         self._grid.setVerticalSpacing(8)
         text = QWidget()
@@ -105,6 +117,9 @@ class SettingRow(QFrame):
             holder.setLayout(control)
             control = holder
         self.text, self.control = text, control
+        for widget in (control, *control.findChildren(QWidget)):  # what a screen reader calls it
+            if not widget.accessibleName() and not getattr(widget, "text", str)():
+                widget.setAccessibleName(title)
         self._stacked = None
         self._place(False)
 
@@ -217,10 +232,12 @@ class SettingsDialog(QDialog):
         self.ctx = ctx  # AppController: provides settings, voices, devices, hotkey status
         self.setWindowTitle("Settings")
         self.setMinimumSize(660, 440)
-        self.resize(860, 620)
+        self.resize(920, 640)
         self.saved_values = copy.deepcopy(ctx.settings.data)
         self.values = copy.deepcopy(self.saved_values)
         self._hotkeys_paused = False
+        self._closing_handled = False
+        self._clear_lines = []  # the shortcut boxes' inner text boxes, kept for their themed clear icons
         self._devices_ready = False  # the device lists are filled when Speech or Listen is first shown
 
         root = QHBoxLayout(self)
@@ -300,10 +317,19 @@ class SettingsDialog(QDialog):
         lay.addSpacing(14)
         return page, lay
 
-    def _row(self, lay, title, control, help_text=""):
-        row = SettingRow(title, control, help_text)
+    def _row(self, lay, title, control, help_text="", compact=False):
+        row = SettingRow(title, control, help_text, compact=compact)
         lay.addWidget(row)
         return row
+
+    @staticmethod
+    def _percent_label():
+        """The value beside a slider, flush with the right edge the other controls line up on."""
+        label = QLabel()
+        label.setObjectName("Muted")
+        label.setFixedWidth(40)
+        label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        return label
 
     def _section(self, lay, text):
         lab = QLabel(text.upper())
@@ -329,49 +355,46 @@ class SettingsDialog(QDialog):
 
     def _page_speech(self):
         page, lay = self._page("Speech", "Voice, speed, volume and where speech plays.")
-        self.voice = _shrinkable()
+        self.voice = _shrinkable(26)
         voices_row = QHBoxLayout()
         refresh = tool_button("refresh", "Refresh the voice list")
         add = QPushButton("Get more voices")
-        add.setProperty("variant", "ghost")
         refresh.clicked.connect(lambda: self.action_requested.emit("refresh_voices"))
         add.clicked.connect(lambda: self.action_requested.emit("add_voices"))
         voices_row.addWidget(self.voice)
         voices_row.addWidget(refresh)
         voices_row.addWidget(add)
         self._row(lay, "Voice", voices_row, "This computer's voices and the natural voices you downloaded.")
-        self.rate = QSlider(Qt.Horizontal)
+        self.rate = Slider()
         self.rate.setRange(settings_mod.speed_percent(settings_mod.RATE_MIN), settings_mod.speed_percent(settings_mod.RATE_MAX))
         self.rate.setSingleStep(5)
         self.rate.setPageStep(10)
         self.rate.setMinimumWidth(140)
         self.rate.setMaximumWidth(240)
-        self.rate_label = QLabel()
-        self.rate_label.setObjectName("Muted")
-        self.rate_label.setFixedWidth(60)
+        self.rate_label = self._percent_label()
         self.rate.valueChanged.connect(self._rate_moved)
         rr = QHBoxLayout()
         rr.addWidget(self.rate)
         rr.addWidget(self.rate_label)
         self._row(lay, "Speed", rr, "100% is normal. Changes are heard right away, even mid-sentence.")
-        self.volume = QSlider(Qt.Horizontal)
+        self.volume = Slider()
         self.volume.setRange(10, 100)
         self.volume.setMinimumWidth(140)
         self.volume.setMaximumWidth(240)
-        self.volume_label = QLabel()
-        self.volume_label.setObjectName("Muted")
-        self.volume_label.setFixedWidth(60)
+        self.volume_label = self._percent_label()
         self.volume.valueChanged.connect(self._volume_moved)
         vr = QHBoxLayout()
         vr.addWidget(self.volume)
         vr.addWidget(self.volume_label)
         self._row(lay, "Volume", vr)
+        self.highlight = ToggleSwitch()
+        self._row(lay, "Highlight the sentence being spoken", self.highlight,
+                  "The editor follows along while it reads.")
         self._section(lay, "Output")
         self.output = _shrinkable()
         test = QPushButton("Test")
         test.clicked.connect(lambda: self.action_requested.emit("test_voice"))
         sound = QPushButton("Sound settings")
-        sound.setProperty("variant", "ghost")
         sound.clicked.connect(lambda: self.action_requested.emit("open_sound"))
         orow = QHBoxLayout()
         orow.addWidget(self.output)
@@ -381,10 +404,8 @@ class SettingsDialog(QDialog):
         self._row(lay, "Output device", orow, "Speech plays here. Test uses the device picked here.")
         self.device_note = QLabel()
         self.device_note.setObjectName("ErrorText")
+        self.device_note.hide()  # shown only with a message (an empty label still takes a row)
         lay.addWidget(self.device_note)
-        self.highlight = ToggleSwitch()
-        self._row(lay, "Highlight the sentence being spoken", self.highlight,
-                  "The editor follows along while it reads.")
         lay.addStretch(1)
         return page
 
@@ -398,13 +419,12 @@ class SettingsDialog(QDialog):
         self._row(lay, "Microphone", irow)
         self.meter = MicMeter()
         self._row(lay, "Input level", self.meter, "Speak to check the microphone is picking you up.")
-        self.model = QComboBox()
+        self.model = _shrinkable(18)
         for name, label in settings_mod.WHISPER_MODELS:
             self.model.addItem(label, name)
         self.model_status = QLabel()
         self.model_status.setObjectName("Muted")
         unload = QPushButton("Unload now")
-        unload.setProperty("variant", "ghost")
         unload.clicked.connect(lambda: self.action_requested.emit("unload_model"))
         mrow = QHBoxLayout()
         mrow.addWidget(self.model_status)
@@ -434,6 +454,7 @@ class SettingsDialog(QDialog):
         self.unload_idle = ToggleSwitch()
         self._row(lay, "Unload the model after each dictation", self.unload_idle, "Frees RAM right away.")
         self.auto_unload = ToggleSwitch()
+        self.auto_unload.toggled.connect(self._sync_dependents)
         self.auto_unload_minutes = QSpinBox()
         self.auto_unload_minutes.setRange(1, 60)
         self.auto_unload_minutes.setSuffix(" min")
@@ -445,6 +466,7 @@ class SettingsDialog(QDialog):
         out = QVBoxLayout()
         self.out_paste = QRadioButton("Type it where my cursor is")
         self.out_clip = QRadioButton("Copy it to the clipboard only")
+        self.out_paste.toggled.connect(self._sync_dependents)
         group = QButtonGroup(self)
         group.addButton(self.out_paste)
         group.addButton(self.out_clip)
@@ -461,12 +483,13 @@ class SettingsDialog(QDialog):
     def _page_clipboard(self):
         page, lay = self._page("Clipboard", "Read copied text aloud or collect it in the queue.")
         self.clip_monitor = ToggleSwitch()
+        self.clip_monitor.toggled.connect(self._sync_dependents)
         self._row(lay, "Watch the clipboard", self.clip_monitor, "Copied text of 6 characters or more is used.")
         self.clip_action = Segmented([("speak", "Speak it", None), ("queue", "Add to queue", None)])
         self._row(lay, "When text is copied", self.clip_action)
         self.clip_auto_queue = ToggleSwitch()
         self._row(lay, "Auto-Queue", self.clip_auto_queue,
-                  "While speech is playing, queue copied text instead of ignoring it.")
+                  "While speech is playing, queue copied text instead of ignoring it. When reading ends, the queue is read next.")
         lay.addStretch(1)
         return page
 
@@ -476,6 +499,8 @@ class SettingsDialog(QDialog):
             edit = QKeySequenceEdit()
             edit.setMaximumSequenceLength(1)
             edit.setClearButtonEnabled(True)
+            self._clear_lines.append(edit.findChild(QLineEdit))
+            mute_clear_button(self._clear_lines[-1])
             edit.setMinimumWidth(150)
             edit.setMaximumWidth(220)
             edit.keySequenceChanged.connect(self._check_conflicts)
@@ -485,7 +510,7 @@ class SettingsDialog(QDialog):
             row.addWidget(status)
             row.addWidget(edit)
             edits[action] = (edit, status)
-            self._row(lay, label_text, row)
+            self._row(lay, label_text, row, compact=True)
 
     def _page_shortcuts(self):
         page, lay = self._page("Shortcuts", "Click a box and press the new key combination.")
@@ -494,6 +519,7 @@ class SettingsDialog(QDialog):
         self._shortcut_rows(lay, keys.SHORTCUT_LABELS, self.shortcut_edits)
         self._section(lay, "Anywhere (global hotkeys)")
         available, reason = self.ctx.hotkey_availability()
+        self._global_available = available
         if not available:
             banner = QLabel(reason + " You can bind these commands in your desktop's keyboard settings instead:\n"
                             "TTSPython.py --toggle-dictation, --speak-clipboard, --stop, --pause, --mini, --show")
@@ -503,6 +529,7 @@ class SettingsDialog(QDialog):
             lay.addWidget(banner)
         self.global_enabled = ToggleSwitch()
         self.global_enabled.setEnabled(available)
+        self.global_enabled.toggled.connect(self._sync_dependents)
         self._row(lay, "Enable global hotkeys", self.global_enabled, "They work even when TTSPython is in the background.")
         self.global_edits = {}
         self._shortcut_rows(lay, keys.GLOBAL_HOTKEY_LABELS, self.global_edits)
@@ -530,9 +557,7 @@ class SettingsDialog(QDialog):
                   "Quit from the tray icon menu." if tray_ok else "No system tray was found on this desktop.")
         path = ElidedLabel(self.ctx.settings.path, Qt.ElideMiddle)
         path.setObjectName("Muted")
-        self.settings_path = path
         open_btn = QPushButton("Open folder")
-        open_btn.setProperty("variant", "ghost")
         open_btn.clicked.connect(lambda: self.action_requested.emit("open_settings_folder"))
         prow = QHBoxLayout()
         prow.addWidget(path, 1)
@@ -548,10 +573,9 @@ class SettingsDialog(QDialog):
 
     def refresh_devices(self):
         self.meter.stop()
-        if not self.ctx.rescan_devices():
-            self.device_note.setText("Stop speech and dictation first, then refresh.")
-        else:
-            self.device_note.setText("")
+        ok = self.ctx.rescan_devices()
+        self.device_note.setText("" if ok else "Stop speech and dictation first, then refresh.")
+        self.device_note.setVisible(not ok)
         self._fill_devices(self.output, "output", self.output.currentData())
         self._fill_devices(self.input, "input", self.input.currentData())
         self._restart_meter()
@@ -589,10 +613,7 @@ class SettingsDialog(QDialog):
     def _load_fields(self, v):
         self._select_theme_card(v["theme_preset"])
         self.performance.setChecked(v["performance_mode"])
-        self.voice.clear()
-        for voice in self.ctx.voices():
-            self.voice.addItem(voice_label(voice.name), voice.id)
-            self.voice.setItemData(self.voice.count() - 1, voice.name, Qt.ToolTipRole)
+        self._fill_voices()
         idx = self.voice.findData(v["tts_voice_id"])
         if idx < 0:  # not saved yet, or no longer installed: show the voice in use
             idx = self.voice.findData(self.ctx.current_voice_id())
@@ -634,7 +655,22 @@ class SettingsDialog(QDialog):
         self.mini_wave.setChecked(v["mini_waveform"])
         self.close_to_tray.setChecked(v["close_to_tray"] and self.ctx.tray_available())
         self._check_conflicts()
+        self._sync_dependents()
         self._restart_meter()  # the mic list was refilled with signals blocked
+
+    def _fill_voices(self):
+        self.voice.clear()
+        for voice in self.ctx.voices():
+            self.voice.addItem(voice_label(voice.name), voice.id)
+            self.voice.setItemData(self.voice.count() - 1, voice.name, Qt.ToolTipRole)
+
+    def _sync_dependents(self, *_):
+        """Grey out what a switch above it has turned off (the values are kept)."""
+        self.clip_action.setEnabled(self.clip_monitor.isChecked())
+        self.auto_unload_minutes.setEnabled(self.auto_unload.isChecked())
+        self.keystroke.setEnabled(self.out_paste.isChecked())
+        for edit, _status in self.global_edits.values():
+            edit.setEnabled(self._global_available and self.global_enabled.isChecked())
 
     def _read_fields(self):
         """The settings to save: only fields changed in this dialog.
@@ -690,11 +726,14 @@ class SettingsDialog(QDialog):
             status.setText("Used twice" if action in clashing else "")
         errors = self.ctx.hotkey_errors()
         registered = self.saved_values.get("global_hotkeys", {})
+        refused = False
         for action, (_edit, status) in self.global_edits.items():
             # A registration error belongs to the saved combo; hide it once the box is edited.
             error = errors.get(action) if glob["global:" + action] == registered.get(action, "") else None
-            status.setText("Used twice" if "global:" + action in clashing else (error or ""))
-        return not conflicts
+            problem = keys.global_hotkey_problem(glob["global:" + action])
+            refused = refused or bool(problem)
+            status.setText("Used twice" if "global:" + action in clashing else (problem or error or ""))
+        return not conflicts and not refused
 
     def refresh_models(self):
         """List the downloaded Whisper models with their size and a Delete button."""
@@ -715,7 +754,6 @@ class SettingsDialog(QDialog):
             rl.setContentsMargins(0, 0, 0, 0)
             label = QLabel(f"{name}  ·  {size / 1e6:,.0f} MB")
             delete = QPushButton("Delete")
-            delete.setProperty("variant", "ghost")
             delete.clicked.connect(lambda _=False, n=name: self._delete_model(n))
             rl.addWidget(label, 1)
             rl.addWidget(delete)
@@ -757,6 +795,12 @@ class SettingsDialog(QDialog):
     def _theme_clicked(self, key):
         self._select_theme_card(key)
         self.preview_theme.emit(key)
+
+    def show_page(self, key):
+        self.nav.setCurrentRow(self._page_index.get(key, 0))
+
+    def current_page(self):
+        return PAGES[self.nav.currentRow()][0]
 
     def _page_changed(self, row):
         self.stack.setCurrentIndex(row)
@@ -828,6 +872,9 @@ class SettingsDialog(QDialog):
     def _reset(self):
         fresh = settings_mod.defaults()
         self.values.update({k: fresh[k] for k in self.form_values()})
+        self.values.update(tts_rate=fresh["tts_rate"], tts_volume=fresh["tts_volume"])
+        self.ctx.set_speech_rate(fresh["tts_rate"])  # these two apply as they move, here as well
+        self.ctx.set_speech_volume(fresh["tts_volume"])
         self._load_fields(self.values)
         self.preview_theme.emit(self.values["theme_preset"])
 
@@ -840,10 +887,7 @@ class SettingsDialog(QDialog):
     def refresh_voices(self):
         current = self.voice.currentData()
         self.voice.blockSignals(True)
-        self.voice.clear()
-        for voice in self.ctx.voices():
-            self.voice.addItem(voice_label(voice.name), voice.id)
-            self.voice.setItemData(self.voice.count() - 1, voice.name, Qt.ToolTipRole)
+        self._fill_voices()
         self.voice.setCurrentIndex(max(0, self.voice.findData(current)))
         self.voice.blockSignals(False)
 
@@ -857,7 +901,7 @@ class SettingsDialog(QDialog):
 
     def reject(self):
         """Esc or the title bar: ask before dropping changes made on these pages."""
-        if not getattr(self, "_closing_handled", False) and self.unsaved_changes():
+        if not self._closing_handled and self.unsaved_changes():
             answer = QMessageBox.question(
                 self, "Unsaved settings", "Save the changes you made in Settings?",
                 QMessageBox.Save | QMessageBox.Discard | QMessageBox.Cancel, QMessageBox.Save)
@@ -872,7 +916,8 @@ class SettingsDialog(QDialog):
         """Every way of closing ends here: drop unsaved previews."""
         self.meter.stop()
         self._set_hotkeys_paused(False)
-        if (self.ctx.settings["tts_rate"], self.ctx.settings["tts_volume"]) !=                 (self.saved_values["tts_rate"], self.saved_values["tts_volume"]):
+        if (self.ctx.settings["tts_rate"], self.ctx.settings["tts_volume"]) != (
+                self.saved_values["tts_rate"], self.saved_values["tts_volume"]):
             self._restore_live_values()  # moved here but never saved
         if self.values.get("theme_preset") != self.saved_values.get("theme_preset"):
             self.preview_theme.emit(self.saved_values["theme_preset"])

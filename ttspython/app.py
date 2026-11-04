@@ -223,9 +223,29 @@ def _run_self_test(controller, out_path):
     stt_model = os.environ.get("TTSPYTHON_SELFTEST_STT")
     if stt_model:
         report["dictation"] = _self_test_dictation(controller, stt_model)
+    report["problems"] = self_test_problems(report)
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(report, f, indent=2)
     controller.quit()
+
+
+def self_test_problems(report):
+    """What a self-test report says is broken, as "part: what happened". Empty when all is well."""
+    problems = []
+    for key in ("sounddevice", "lameenc", "numpy", "ctranslate2", "onnxruntime", "faster_whisper", "vad_model",
+                "ui_automation", "preview_engine"):
+        if report.get(key, "ok") != "ok":
+            problems.append(f"{key}: {report[key]}")
+    for key in ("output_devices", "piper_catalog"):
+        if isinstance(report.get(key), str):
+            problems.append(f"{key}: {report[key]}")
+    if not report.get("engine_ready"):
+        problems.append("engine_ready: the speech engine did not start")
+    if not report.get("voices"):
+        problems.append("voices: none found")
+    if report.get("export_error") or not report.get("mp3_export_bytes"):
+        problems.append(f"mp3_export: {report.get('export_error') or 'no file was written'}")
+    return problems
 
 
 def preview_ready():

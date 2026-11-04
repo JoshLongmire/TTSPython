@@ -6,6 +6,8 @@ synth thread.
 """
 from __future__ import annotations
 
+import contextlib
+import gc
 import math
 import os
 import shutil
@@ -252,6 +254,8 @@ class Pyttsx3FileRenderer:
             raise Cancelled()
         path = os.path.join(self._dir, "chunk.wav")
         with self._engine_lock:
+            with contextlib.suppress(FileNotFoundError):
+                os.remove(path)  # so an engine that writes nothing cannot replay the last chunk
             if voice_id:
                 self._engine.setProperty("voice", voice_id)
             self._engine.setProperty("rate", int(wpm))
@@ -260,6 +264,8 @@ class Pyttsx3FileRenderer:
             self._engine.runAndWait()
             if cancel.is_set():
                 raise Cancelled()
+            if not os.path.exists(path):
+                raise RuntimeError("The pyttsx3 speech engine produced no audio.")
             with open(path, "rb") as f:
                 data = f.read()
         return parse_wav(data)
@@ -337,4 +343,7 @@ def list_voices_once():
 
     with com_apartment():
         renderer = create_renderer()
-        return renderer.name, renderer.list_voices()
+        result = renderer.name, renderer.list_voices()
+        del renderer  # its COM objects must go while the apartment is open
+        gc.collect()
+    return result

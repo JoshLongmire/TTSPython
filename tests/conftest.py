@@ -8,6 +8,8 @@ import pytest
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+if os.path.isdir(r"C:\Windows\Fonts"):
+    os.environ.setdefault("QT_QPA_FONTDIR", r"C:\Windows\Fonts")  # real text sizes, for layout tests
 # Never talk to a TTSPython the user has running: tests get their own single-instance name.
 os.environ["TTSPYTHON_INSTANCE"] = f"ttspython-tests-{os.getpid()}"
 # Downloaded voices and the Piper program: a scratch folder, never the user's.

@@ -78,8 +78,18 @@ def replace_all(text, term, replacement, case_sensitive=False, use_regex=False):
     """Return (new_text, count). Literal mode never interprets backslashes."""
     pattern = compile_pattern(term, case_sensitive, use_regex)
     if use_regex:
+        count = 0
+
+        def expanded(m):  # like Find, an empty match does not count: "x*" must not fill the gaps
+            nonlocal count
+            if not m.group(0):
+                return ""
+            count += 1
+            return m.expand(replacement)
+
         try:
-            return pattern.subn(replacement, text)
+            pattern.sub(replacement, "")  # a bad replacement is reported even when nothing matches
+            return pattern.sub(expanded, text), count
         except (re.error, IndexError) as exc:
             raise SearchError(f"Invalid replacement: {exc}") from exc
     return pattern.subn(lambda _m: replacement, text)

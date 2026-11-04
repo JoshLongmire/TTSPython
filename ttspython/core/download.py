@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import os
 import time
+import urllib.error
 
 from .settings import atomic_replace
 
@@ -54,10 +55,13 @@ def fetch(url, dest, progress=None, md5=None, sha256=None, cancel=None, opener=_
         if digest is not None and digest.hexdigest() != expected:
             raise ChecksumError(f"The download of {os.path.basename(dest)} was damaged (checksum mismatch). Try again.")
         atomic_replace(part, dest)
-    except BaseException:
+    except BaseException as exc:
         try:
             os.remove(part)
         except OSError:
             pass
+        if isinstance(exc, (urllib.error.URLError, TimeoutError, ConnectionError)):
+            reason = getattr(exc, "reason", None) or exc
+            raise OSError(f"Could not download {os.path.basename(dest)}: check your internet connection ({reason}).") from exc
         raise
     return dest

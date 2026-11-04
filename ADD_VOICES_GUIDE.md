@@ -11,7 +11,7 @@ Pick the voice in **Settings > Speech > Voice**, or in the mini bar's popover (c
 
 ## Natural voices (Piper)
 
-1. Open **Settings > Speech** and press **Get more voices**.
+1. Open **Settings > Speech** and press **Get more voices**. Pick a language, and type in the filter box to narrow the list by name, country or quality.
 2. Choose a **language**. Each voice is listed with its country, quality (small, medium or best) and download size.
 3. Not sure which one? **Hear samples online** opens the official sample page, where you can listen to each voice.
 4. Select a voice and press **Download** (or double-click it). Most voices are about 60 MB; the "best" ones about
@@ -40,7 +40,7 @@ SAPI5 voices and the newer Windows speech voices, so a voice Windows installed i
 appears.
 
 To add more:
-1. In **Get more voices**, press **Open Windows speech settings** (or open **Settings > Time & language >
+1. In **Get more voices**, press **Open speech settings** (or open **Settings > Time & language >
    Speech** yourself).
 2. Press **Add voices** and pick a language (for example English (United Kingdom) for Hazel and George).
 3. Back in TTSPython, press **Refresh** next to the voice list in **Settings > Speech**. No restart needed.

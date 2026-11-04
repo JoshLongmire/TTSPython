@@ -204,6 +204,19 @@ _MODIFIER_NAMES = {"ctrl": "Ctrl", "control": "Ctrl", "alt": "Alt", "shift": "Sh
                    "meta": "Meta", "win": "Meta", "super": "Meta", "num": "Num"}
 
 
+# Without a modifier these would stop working for typing in every other app.
+_TYPING_KEYS = {"Space", "Return", "Enter", "Tab", "Backspace", "Esc", "Del", "Delete", "Ins", "Insert",
+                "Left", "Right", "Up", "Down", "Home", "End", "PgUp", "PgDown"}
+
+
+def global_hotkey_problem(combo):
+    """What is wrong with this combination as a global hotkey, or None."""
+    parsed = parse_combo(combo)
+    if parsed and not parsed[0] and (len(parsed[1]) == 1 or parsed[1] in _TYPING_KEYS):
+        return "Add Ctrl, Alt or Shift"
+    return None
+
+
 def parse_combo(text):
     """Parse "Ctrl+Alt+D" into (frozenset({"Ctrl","Alt"}), "D"). None if invalid."""
     if not isinstance(text, str) or not text.strip():

@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import enum
 import gc
+import logging
 import os
 import queue
 import threading
@@ -36,6 +37,8 @@ from ..events import EventEmitter
 from ..transcript import normalize_transcript_text
 from . import preview as preview_mod
 from .recorder import Recorder, resample
+
+log = logging.getLogger(__name__)
 
 INITIAL_PROMPT = "Use normal capitalization and punctuation."
 WHOLE_SECONDS = 8.0    # up to this much unsettled audio, every pass covers all of it (no cuts)
@@ -443,6 +446,7 @@ class SttService:
                 self.recorder.start(self.input_device)
             except Exception as exc:
                 self.events.emit("error", f"Could not start recording: {friendly_audio_error(exc)}")
+                self._schedule_unload()  # the timer was cancelled above
                 return False
             self._target = target
             self._load_failed = None
@@ -532,7 +536,7 @@ class SttService:
         """Feed the recorder's blocks to the instant preview, if it can run this time."""
         self._preview = None
         self.recorder.on_block = None
-        if not self.preview_wanted():
+        if not self.preview_wanted() or self._preview_failed:
             return
         if self.preview_factory is None:
             if not preview_mod.available():
@@ -557,9 +561,24 @@ class SttService:
                 rate = getattr(self.recorder, "capture_rate", self.recorder.sample_rate)
                 session_obj = preview_mod.PreviewSession(on_words, on_pause, convert=_block_converter(rate)).start()
         except Exception:
+            log.exception("The live preview could not start")
             return
         self._preview = session_obj
         self.recorder.on_block = session_obj.feed
+
+    def _preview_alive(self):
+        """Whether the preview is running. One that failed is dropped, and the user is told once."""
+        session = self._preview
+        if session is None:
+            return False
+        error = getattr(session, "error", None)
+        if error is None:
+            return True
+        self._preview = None
+        self.recorder.on_block = None
+        self._preview_failed = True  # try again after a restart, not on every dictation
+        self.events.emit("preview_status", f"Live preview failed: {error}. Captions come from Whisper alone for now.")
+        return False
 
     def _stop_preview(self):
         self.recorder.on_block = None
@@ -627,9 +646,9 @@ class SttService:
                 if any(ch.isalnum() for ch in (text or ""))]
 
     @staticmethod
-    def _quiet_point(audio, rate, start, end):
+    def _quiet_point(audio, rate, start, end, speech):
         """The middle of the quietest PAUSE_WINDOW in audio[start:end] (seconds), or None
-        if nothing there is quiet enough to be a pause between words."""
+        if nothing there is quiet enough to be a pause between words (speech: the recording's level)."""
         win = int(rate * PAUSE_WINDOW)
         a, b = max(0, int(start * rate)), min(audio.size, int(end * rate))
         if b - a < win:
@@ -639,7 +658,6 @@ class SttService:
         hop = max(1, win // 4)
         frames = np.lib.stride_tricks.sliding_window_view(audio[a:b], win)[::hop]
         levels = np.sqrt(np.mean(frames * frames, axis=1))
-        speech = np.sqrt(np.mean(audio * audio)) or 1e-9
         i = int(np.argmin(levels))
         if levels[i] > PAUSE_LEVEL * speech:
             return None
@@ -652,12 +670,15 @@ class SttService:
         seconds = audio.size / rate
         cut, cut_sample = 0, 0
         if seconds > WHOLE_SECONDS - SETTLE_GAP:
-            for i, (_start, end, _text) in enumerate(segments[:-1]):
+            speech = float(np.sqrt(np.mean(audio * audio))) or 1e-9
+            for i in range(len(segments) - 2, -1, -1):  # the latest real pause is the one wanted
+                end = segments[i][1]
                 if end > seconds - SETTLE_GAP:
-                    break
-                point = self._quiet_point(audio, rate, end - 0.15, segments[i + 1][0] + 0.15)
+                    continue
+                point = self._quiet_point(audio, rate, end - 0.15, segments[i + 1][0] + 0.15, speech)
                 if point is not None:
                     cut, cut_sample = i + 1, point
+                    break
             if not cut and seconds > MAX_TAIL and len(segments) > 1:  # no pause: cut at the last segment
                 cut, cut_sample = len(segments) - 1, int(segments[-2][1] * rate)
         if cut:
@@ -688,6 +709,7 @@ class SttService:
                 segments = self._whisper(self._get_model(), audio,
                                          words=audio.size / rate > WHOLE_SECONDS - SETTLE_GAP)
             except Exception:
+                log.exception("A live caption pass failed; captions stop until the next dictation")
                 return
             # Kept even if dictation stopped meanwhile: stop can use it instead of a new pass.
             self._last_pass = (base, base + audio.size, " ".join(t for _s, _e, t in segments if t))
@@ -700,13 +722,15 @@ class SttService:
                 self._last_pass = None
             self._emit_partial(session)
             spent = time.monotonic() - started
-            rest = max(LIVE_PREVIEW_REST if self._preview is not None else LIVE_REST, spent * LIVE_REST_SHARE)
+            rest = max(LIVE_PREVIEW_REST if self._preview_alive() else LIVE_REST, spent * LIVE_REST_SHARE)
             end = time.monotonic() + rest
             while time.monotonic() < end and self._session == session and not self._pass_now.is_set():
                 time.sleep(0.02)
 
     def _transcribe(self, audio, target):
         try:
+            if self._cancelled:
+                return
             if audio.size < self.recorder.sample_rate * 0.2:
                 self.events.emit("model_status", "No audio captured")
                 return

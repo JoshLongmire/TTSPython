@@ -51,6 +51,8 @@ class ThemeManager(QObject):
     def apply(self, key):
         if key not in THEME_PRESETS:
             key = DEFAULT_THEME
+        if key == self.key and self.tokens:
+            return self.tokens  # already on: restyling every window costs about 50 ms
         self.key = key
         t = derive_tokens(THEME_PRESETS[key])
         self.tokens = t

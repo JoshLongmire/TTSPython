@@ -108,6 +108,7 @@ class SpeechController:
         self.rate = int(rate)
         self.volume = float(volume)
         self.auto_queue = False
+        self._engine_error = None
         self.loop = False
         self.playing_item_id = ""
         self.voices = []
@@ -265,6 +266,7 @@ class SpeechController:
                 self._load_voices(renderer)
             except Exception as exc:
                 renderer = None
+                self._engine_error = exc
                 # Held: this can happen before the UI has subscribed to errors.
                 self.events.emit("error", f"Speech engine failed to start: {exc}", hold=True)
             self._warm_up(renderer)
@@ -283,6 +285,10 @@ class SpeechController:
                             self.events.emit("error", f"Could not list voices: {exc}")
                     continue
                 self._run_job(renderer, cmd)
+
+    def no_engine_message(self):
+        cause = f" ({self._engine_error})" if self._engine_error else ""
+        return f"No speech engine is available{cause}."
 
     def _warm_up(self, renderer):
         """Pay one-time costs now (PortAudio init, first SAPI render), not on first Speak."""
@@ -317,7 +323,7 @@ class SpeechController:
             if skip:
                 return
             if renderer is None:
-                raise RuntimeError("No speech engine is available.")
+                raise RuntimeError(self.no_engine_message())
             self.player.prepare()
             if job.kind == "single":
                 utt = next(self._utt_ids)
@@ -335,7 +341,7 @@ class SpeechController:
             self.events.emit("error", str(exc))
         except Exception as exc:
             self.player.flush()  # never leave this job's audio playing behind an IDLE state
-            self.events.emit("error", str(exc))
+            self.events.emit("error", str(exc) or type(exc).__name__)
         finally:
             with self._lock:
                 self.playing_item_id = ""

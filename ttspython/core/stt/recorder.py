@@ -5,6 +5,8 @@ import threading
 
 import numpy as np
 
+from ..resample import resample
+
 SAMPLE_RATE = 16000
 MAX_SECONDS = 30 * 60
 
@@ -23,13 +25,6 @@ def open_input_stream(sd, device, sample_rate, callback, dtype="int16", blocksiz
         size = max(256, int(blocksize * rate / sample_rate))
         return sd.InputStream(samplerate=rate, channels=1, dtype=dtype, blocksize=size,
                               device=device, callback=callback), rate
-
-
-def resample(samples, src_rate, dst_rate):
-    if src_rate == dst_rate or samples.size == 0:
-        return samples
-    n = max(1, int(round(samples.size * dst_rate / src_rate)))
-    return np.interp(np.linspace(0.0, samples.size - 1, n), np.arange(samples.size), samples).astype(np.float32)
 
 
 class Recorder:
@@ -59,10 +54,6 @@ class Recorder:
 
             self._sd = sounddevice
         return self._sd
-
-    @property
-    def recording(self):
-        return self._stream is not None
 
     def start(self, device=None):
         if self._stream is not None:

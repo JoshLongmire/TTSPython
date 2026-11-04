@@ -105,17 +105,10 @@ class Stretcher:
         return int(left) + self._pending.size - self._offset
 
     def _frame(self, start):
-        """n input samples from start, zero-padded outside the buffer."""
-        n, size = self.n, self.x.size
-        if 0 <= start and start + n <= size:
-            return self.x[start:start + n]
-        out = np.zeros(n, dtype=np.float32)
-        a, b = max(0, start), min(size, start + n)
-        if b > a:
-            out[a - start:b - start] = self.x[a:b]
-        return out
+        return self._region(start, self.n)
 
     def _region(self, start, length):
+        """length input samples from start, zero-padded outside the buffer."""
         if 0 <= start and start + length <= self.x.size:
             return self.x[start:start + length]
         out = np.zeros(length, dtype=np.float32)

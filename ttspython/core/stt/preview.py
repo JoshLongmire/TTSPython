@@ -191,6 +191,7 @@ class PreviewSession:
                     rec.reset(stream)
         except Exception as exc:  # no preview this time; Whisper still captions and types
             self.error = exc
+            self._stopped.set()  # or feed() would keep queueing audio nobody reads
 
     _peak = 0.0
     _floor = None

@@ -5,8 +5,8 @@
 - **Top bar**: app name and version, the **Speak / Listen** switch, and buttons for Open (its arrow lists recent files), Save, Save as, Export audio, Find and replace, Mini mode and Settings. Hover a button to see what it does (and its shortcut, if it has one).
 - **Editor card**: the document name (with a dot when there are unsaved changes), live word and character counts with the reading time at the current speed, **Paste** and **Clear** (Clear can be undone with `Ctrl+Z`; it also detaches the file, so Save asks where to save). The window title shows the file name too.
 - **Speech queue panel** on the right (show or hide it with `Ctrl+Q` or the queue button at the bottom right).
-- **Control bar** at the bottom: Play/Pause, Stop, Speak selected, the current sentence and progress, a live waveform, speed (in percent) and volume. The voice is picked in Settings > Speech or the mini bar's popover.
-- **Status bar**: messages, the clipboard monitor controls, Performance Mode and the output device in use (click it to change it). On narrow windows the output device and then Performance Mode make room (both are also in Settings).
+- **Control bar** at the bottom: Play/Pause, Stop, Speak selected, the current sentence and progress, a live waveform while it speaks, speed and volume (both in percent). The voice is picked in Settings > Speech or the mini bar's popover.
+- **Status bar**: messages, the clipboard monitor controls (Speak or Queue shows only while the monitor is on), Performance Mode and the output device in use (click it to change it). On narrow windows the output device and then Performance Mode make room for the messages (both are also in Settings).
 
 ## Speak (text-to-speech)
 
@@ -70,8 +70,8 @@ Change them in **Settings > Shortcuts**. If another program already owns a combi
 - **Add text** (the editor contents), **Add files** (several at once) and clipboard items (from the clipboard monitor).
 - **Play queue** starts at the selected item (or the top). Double-click an item or press `Enter` to play from it. Items are separated by a half-second pause.
 - **Right-click** an item: Play from here, Move to top, Copy to the editor, Remove.
-- **Drop text files** on the queue to add them.
-- **Drag** items to reorder, or use the up and down arrows. **Remove** (or Delete) and **Clear queue**.
+- **Drop text files** on the queue to add them, even when it is empty.
+- **Drag** items to reorder, or use the up and down arrows. The minus button (or Delete) removes an item; **Clear queue** removes them all.
 - **Loop** repeats the whole queue.
 - Each row shows the item type, word count and listening time; the playing item is marked with an accent bar.
 - The queue is kept when you quit and comes back the next time.
@@ -81,8 +81,8 @@ Change them in **Settings > Shortcuts**. If another program already owns a combi
 
 In the status bar (or Settings > Clipboard):
 - **Clipboard** switch turns it on. Text already on the clipboard when you turn it on is not used.
-- **Speak** reads copied text right away; **Queue** adds it to the queue.
-- **Auto-Queue**: while speech is playing, copied text is queued instead of ignored, and queued items play once after the current speech.
+- **Speak** reads copied text right away; **Queue** adds it to the queue. This choice appears once the switch is on.
+- **Auto-Queue**: while speech is playing, copied text is queued instead of ignored, and queued items play once after the current speech. When reading ends, the queue is read next, with the clipboard monitor on or off.
 - Text shorter than 6 characters is ignored, and so is text TTSPython itself put on the clipboard.
 
 ## Export audio

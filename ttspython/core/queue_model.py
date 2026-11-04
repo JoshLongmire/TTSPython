@@ -62,6 +62,18 @@ class SpeechQueue:
                     return i
         return -1
 
+    def add_many(self, entries, announce=True):
+        """Add (text, name, kind) entries, with one "changed" at the end. announce=False is for
+        putting back a saved queue: nothing about the list has changed since it was saved."""
+        events, self.events = self.events, EventEmitter()  # add() stays quiet meanwhile
+        try:
+            for text, name, kind in entries:
+                self.add(text, name, kind)
+        finally:
+            self.events = events
+        if announce:
+            self._changed()
+
     def add(self, text, name, kind="text"):
         item = QueueItem(text=text, name=name, kind=kind if kind in KINDS else "text")
         with self._lock:

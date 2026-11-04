@@ -3,6 +3,7 @@
 Usage: python tools/screenshots.py --out <folder> [--themes all|studio,light] [--scale 1]
 Set TTSPYTHON_DATA (Piper voices, live preview model) and HF_HOME (Whisper models) to folders with
 downloads in them to show those; by default both are empty temporary folders, never your own.
+With QT_QPA_PLATFORM=offscreen and QT_QPA_FONTDIR=C:/Windows/Fonts no window opens on the desktop.
 """
 import argparse
 import os
@@ -68,6 +69,12 @@ def main():
         print(path)
 
     def run():
+        try:
+            capture()
+        finally:
+            ctl.quit()  # or a failure leaves the windows open and this program running
+
+    def capture():
         ctl.editor.begin_tracking()
         ctl.editor.highlight_range(HL_START, HL_END)
         ctl.window.transport.set_progress(1, 4, "Sentence 2 of 4")
@@ -141,7 +148,6 @@ def main():
             ctl.popover.show()
             grab(ctl.popover, "mini_popover")
             ctl.popover.hide()
-        ctl.quit()
 
     QTimer.singleShot(300, run)
     app.exec()

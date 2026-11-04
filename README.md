@@ -55,13 +55,13 @@ Work even when TTSPython is in the background. All can be changed in **Settings 
 
 ### Speech queue
 - Add the editor text, text files or clipboard items and play them back to back.
-- **Drag to reorder** (or Move up / Move down), **Remove** (or the Delete key), **Clear**, **Loop**.
+- **Drag to reorder** (or the up and down arrows), **Remove** (the minus button or the Delete key), **Clear**, **Loop**.
 - Double-click an item (or press `Enter`) to play from there; right-click for Play from here, Move to top, Copy to the editor and Remove. Each item shows how long it takes to listen to.
-- Drop text files on the queue to add them. The playing item is marked, editing the queue while it plays is safe, and the queue is kept for the next start.
+- Drop text files on the queue to add them, even when it is empty. The playing item is marked, editing the queue while it plays is safe, and the queue is kept for the next start.
 
 ### Clipboard monitor
 - Watches the clipboard and either **speaks** or **queues** copied text (6 characters or more).
-- **Auto-Queue**: while speech is playing, copied text is queued instead of ignored, then played once.
+- **Auto-Queue**: while speech is playing, copied text is queued instead of ignored, then played once. When reading ends, the queue is read next (this part works with the clipboard monitor off too).
 
 ### Export audio
 - Save the text (or just the selected part) as **WAV** or **MP3** with the current voice, speed and volume. Export runs in the background with progress and a Cancel button, writes as it goes (a whole book never sits in memory), remembers the folder and format, and offers **Open folder** when done.
@@ -281,8 +281,8 @@ Each system builds its own app (PyInstaller cannot build for another OS). Build 
 you want to support. Pushing a `v*` tag runs `.github/workflows/build.yml`, which builds and smoke-tests both
 and attaches them to the GitHub release. To check a build, run it with `TTSPYTHON_SELFTEST=<report.json>`: it loads
 every part (voices, the Piper voice list, MP3 export, Whisper libraries, the live preview engine and, if downloaded,
-its model, audio devices), writes the report and quits,
-without sound. Add `TTSPYTHON_SELFTEST_STT=tiny` to also dictate a spoken test phrase through the real transcription
+its model, audio devices), writes the report (with a `problems` list, empty when all is well) and quits,
+without sound. `python packaging/build.py --check` does this right after building and fails if it finds a problem. Add `TTSPYTHON_SELFTEST_STT=tiny` to also dictate a spoken test phrase through the real transcription
 path, played in real time with live captions (downloads that model if needed; the result is never typed anywhere).
 `TTSPYTHON_SELFTEST_PHRASE` changes the phrase, `TTSPYTHON_SELFTEST_LIVE=0` turns the captions off for comparison,
 and `TTSPYTHON_SELFTEST_VOICE=<voice id>` exports the test MP3 with that voice (for example a downloaded Piper voice).

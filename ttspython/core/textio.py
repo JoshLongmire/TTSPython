@@ -81,6 +81,8 @@ def write_text_file(path, text, encoding="utf-8", newline=None, bom=False):
     Returns the encoding used, which is UTF-8 if the text cannot be stored in `encoding`.
     """
     data, used = encode_text(text, encoding, newline, bom)
+    if os.path.exists(path) and not os.access(path, os.W_OK):
+        raise PermissionError("This file is read-only. Use Save as to keep your text in another file.")
     tmp = path + ".part"
     with open(tmp, "wb") as f:
         f.write(data)

@@ -62,8 +62,16 @@ class CatalogVoice:
     @property
     def label(self):
         """e.g. "Lessac (English, United States, medium)"."""
-        name = self.name.replace("_", " ").title()
-        return f"{name} ({self.language}, {self.country}, {QUALITY.get(self.quality, self.quality)})"
+        return f"{self.title} ({self.language}, {self.country}, {QUALITY.get(self.quality, self.quality)})"
+
+    @property
+    def title(self):
+        return self.name.replace("_", " ").title()
+
+    @property
+    def details(self):
+        """e.g. "United States, medium", for a list that already shows the language."""
+        return f"{self.country}, {QUALITY.get(self.quality, self.quality)}"
 
 
 _catalog = []
@@ -225,26 +233,42 @@ class _Process:
         self.key = key
         self.length_scale = length_scale
         self.out_dir = tempfile.mkdtemp(prefix="ttspython-piper-out-")
+        self.stderr_path = os.path.join(self.out_dir, "stderr.txt")
         env = dict(os.environ)
         if not IS_WINDOWS:
             env["LD_LIBRARY_PATH"] = program_dir() + os.pathsep + env.get("LD_LIBRARY_PATH", "")
-        self.proc = subprocess.Popen(
-            [program_path(), "--model", model_path(key), "--json-input", "--quiet",
-             "--length_scale", f"{length_scale:.3f}", "--sentence_silence", "0.15",
-             "--espeak_data", os.path.join(program_dir(), "espeak-ng-data")],
-            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=env,
-            cwd=program_dir(), creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        with open(self.stderr_path, "wb") as stderr:  # a file: a full pipe would stall the program
+            self.proc = subprocess.Popen(
+                [program_path(), "--model", model_path(key), "--json-input", "--quiet",
+                 "--length_scale", f"{length_scale:.3f}", "--sentence_silence", "0.15",
+                 "--espeak_data", os.path.join(program_dir(), "espeak-ng-data")],
+                stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=stderr, env=env,
+                cwd=program_dir(), creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         self.count = 0
 
     def alive(self):
         return self.proc.poll() is None
 
+    def failure_message(self):
+        """Why the program stopped, in its own last words if it left any."""
+        try:
+            with open(self.stderr_path, "rb") as f:
+                f.seek(0, os.SEEK_END)
+                f.seek(max(0, f.tell() - 300))
+                said = f.read().decode("utf-8", "replace").strip()
+        except OSError:
+            said = ""
+        return f"The Piper program stopped unexpectedly: {said}" if said else "The Piper program stopped unexpectedly."
+
     def say(self, text, cancel):
         self.count += 1
         path = os.path.join(self.out_dir, f"{self.count}.wav")
         line = json.dumps({"text": " ".join(text.split()), "output_file": path}) + "\n"
-        self.proc.stdin.write(line.encode("utf-8"))
-        self.proc.stdin.flush()
+        try:
+            self.proc.stdin.write(line.encode("utf-8"))
+            self.proc.stdin.flush()
+        except OSError as exc:
+            raise RuntimeError(self.failure_message()) from exc
         result = {}
 
         def read():
@@ -258,7 +282,7 @@ class _Process:
                 self.close()  # the next render starts a fresh process
                 raise Cancelled()
         if not result.get("line"):
-            raise RuntimeError("The Piper program stopped unexpectedly.")
+            raise RuntimeError(self.failure_message())
         try:
             with open(path, "rb") as f:
                 data = f.read()

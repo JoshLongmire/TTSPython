@@ -6,7 +6,7 @@ from string import Template
 from PySide6.QtGui import QColor, QFont, QFontDatabase, QPalette
 
 from ..core.platform import IS_WINDOWS, IS_DARWIN
-from ..core.theme import darken, mix
+from ..core.theme import darken
 
 UI_FONT_CANDIDATES = (
     ["Segoe UI Variable Text", "Segoe UI"] if IS_WINDOWS else
@@ -73,9 +73,9 @@ QToolTip { background: ${surface2}; color: ${text}; border: 1px solid ${border};
 /* Cards */
 QFrame#Card { background: ${surface}; border: ${border_w}px solid ${divider}; border-radius: ${radius_card}px; }
 #CardTitle { font-weight: 600; font-size: 10.5pt; }
-#Muted, QLabel[muted="true"] { color: ${muted}; }
+#Muted { color: ${muted}; }
 #SectionLabel { color: ${muted}; font-size: 8.5pt; font-weight: 600; letter-spacing: 0.6px; }
-#Badge { background: ${accent_soft}; color: ${accent_text}; border-radius: 9px; padding: 0px 7px; font-size: 8.5pt; font-weight: 600; }
+#Badge { background: ${accent_soft}; color: ${accent_text}; border-radius: 9px; min-height: 18px; min-width: 8px; padding: 0px 5px; font-size: 8.5pt; font-weight: 600; }
 #Dot { background: ${accent}; border-radius: 3px; }
 
 /* Editor */
@@ -104,20 +104,19 @@ QPushButton[variant="ghost"]:pressed, QToolButton[variant="ghost"]:pressed { bac
 QPushButton[variant="ghost"]:checked, QToolButton[variant="ghost"]:checked { background: ${accent_soft}; color: ${accent_text}; }
 QToolButton[variant="ghost"]:disabled { background: transparent; }
 
-QToolButton[variant="round"] { border-radius: 22px; padding: 0px; }
 QToolButton[variant="round_primary"] { background: ${accent_fill}; border: none; border-radius: 24px; padding: 0px; }
 QToolButton[variant="round_primary"]:hover { background: ${accent_hover}; }
 QToolButton[variant="round_primary"]:pressed { background: ${accent_pressed}; }
-QToolButton[variant="record"] { background: ${danger}; border: none; border-radius: 30px; }
+QToolButton[variant="record"] { background: ${danger}; border: none; border-radius: 24px; }
 QToolButton[variant="record"]:hover { background: ${danger_hover}; }
-QToolButton[variant="record"]:checked { background: ${danger_hover}; border: 3px solid ${danger_ring}; }
-QPushButton[variant="danger"] { color: ${danger}; }
 
 /* Segmented control */
 #Segmented { background: ${window}; border: ${border_w}px solid ${divider}; border-radius: 9px; }
 #Segmented QToolButton { background: transparent; border: none; border-radius: 7px; padding: 5px 14px; color: ${muted}; font-weight: 600; }
 #Segmented QToolButton:hover { color: ${text}; }
 #Segmented QToolButton:checked { background: ${surface2}; color: ${text}; border: 1px solid ${border}; }
+#Segmented QToolButton:disabled { color: ${disabled_text}; }
+#Segmented QToolButton:checked:disabled { background: ${disabled}; border-color: ${divider}; }
 #SegmentedSmall { background: transparent; border: none; }
 #SegmentedSmall QToolButton { background: transparent; border: none; border-radius: 6px; padding: 2px 9px; color: ${muted}; font-weight: 600; font-size: 9pt; }
 #SegmentedSmall QToolButton:hover { color: ${text}; }
@@ -137,21 +136,18 @@ QComboBox QAbstractItemView { background: ${surface2}; color: ${text}; border: 1
 QSpinBox::up-button, QSpinBox::down-button { width: 0px; border: none; }
 
 /* Sliders */
-QSlider::groove:horizontal { height: 4px; background: ${scrollbar}; border-radius: 2px; }
-QSlider::sub-page:horizontal { background: ${accent}; border-radius: 2px; }
-QSlider::handle:horizontal { background: ${handle}; border: 2px solid ${accent}; width: 12px; height: 12px; margin: -6px 0; border-radius: 8px; }
-QSlider::handle:horizontal:hover { background: ${accent}; }
-QSlider::sub-page:horizontal:disabled { background: ${disabled_text}; }
+/* Only the handle's size for dragging: widgets.Slider paints them, as a stylesheet handle gets cut off. */
+QSlider::groove:horizontal { height: 4px; }
+QSlider::handle:horizontal { width: 16px; margin: -6px 0; }
 
 /* Radio buttons */
 QRadioButton { spacing: 8px; background: transparent; }
-QRadioButton::indicator { width: 16px; height: 16px; border: ${border_w}px solid ${border}; background: ${field}; }
-QRadioButton::indicator { border-radius: 9px; }
+QRadioButton::indicator { width: 16px; height: 16px; border: ${border_w}px solid ${border}; background: ${field}; border-radius: ${radio_radius}px; }
 QRadioButton::indicator:hover { border-color: ${accent}; }
-QRadioButton::indicator:checked { background: ${field}; border: 5px solid ${accent_fill}; }
+QRadioButton::indicator:checked { width: ${radio_dot}px; height: ${radio_dot}px; background: ${field}; border: 5px solid ${accent_fill}; }
 
 /* Lists */
-QListWidget, QListView, QTreeView { background: transparent; border: none; outline: none; }
+QListWidget, QListView { background: transparent; border: none; outline: none; }
 QListWidget::item, QListView::item { border-radius: 8px; padding: 6px; }
 QListWidget::item:hover { background: ${hover}; }
 QListWidget::item:selected { background: ${accent_soft}; color: ${text}; }
@@ -176,7 +172,6 @@ QStatusBar QLabel { color: ${muted}; }
 QStatusBar::item { border: none; }
 #StatusChip { color: ${muted}; padding: 2px 8px; border-radius: 8px; }
 #StatusText { padding-left: 14px; }
-#StatusGroup { background: ${surface}; border: ${border_w}px solid ${divider}; border-radius: 9px; }
 
 /* Splitter */
 QSplitter::handle { background: transparent; }
@@ -193,8 +188,6 @@ QMenu::item:disabled { color: ${disabled_text}; }
 QMenu::separator { height: 1px; background: ${divider}; margin: 5px 6px; }
 QMenu::icon { padding-left: 8px; }
 
-/* Tabs (fallback) */
-
 /* Settings */
 #PageTitle { font-size: 15pt; font-weight: 600; }
 #PageSubtitle { color: ${muted}; }
@@ -203,10 +196,11 @@ QMenu::icon { padding-left: 8px; }
 #ErrorText { color: ${danger}; }
 #ThemeCard { background: transparent; border: 2px solid transparent; border-radius: 12px; }
 #ThemeCard:hover { border-color: ${border}; }
+#ThemeCard:focus { border-color: ${focus}; }
 #ThemeCard[selected="true"] { border-color: ${accent}; }
 
 /* Toast */
-#Toast { background: ${toast_bg}; color: ${toast_text}; border-radius: 10px; padding: 9px 14px; }
+#Toast { background: ${surface2}; color: ${text}; border: 1px solid ${border}; border-radius: 10px; }
 """)
 
 
@@ -214,9 +208,9 @@ def build_qss(t, chevron_path):
     values = dict(t)
     values["chevron"] = chevron_path.replace("\\", "/")
     values["ghost_border"] = f"{t['border_w']}px solid {t['border']}" if t["border_w"] > 1 else "1px solid transparent"
-    values["handle"] = t["field"]
     values["danger_hover"] = darken(t["danger"], 0.12)
-    values["danger_ring"] = mix(t["danger"], t["window"], 0.55)
-    values["toast_bg"] = t["text"]
-    values["toast_text"] = t["window"]
+    # A checked radio button's thick border must leave it the same size as an unchecked one.
+    outer = 16 + 2 * t["border_w"]
+    values["radio_radius"] = outer // 2
+    values["radio_dot"] = outer - 10
     return _QSS.substitute(values)

@@ -13,7 +13,7 @@ from ..core import search
 from ..core.chunking import utf16_len
 from . import icons
 from .style import EDITOR_FONT_CANDIDATES, pick_family
-from .widgets import dropped_text_files, tool_button
+from .widgets import ElidedLabel, TextFileDropMixin, action_button, mute_clear_button, tool_button
 
 
 _SENTENCE_END = re.compile(r"[.!?…]+[\"'”’)\]]*\s+|\n\s*")
@@ -55,7 +55,7 @@ def u16_to_py(text, pos16):
     return len(text)
 
 
-class SpeechTextEdit(QPlainTextEdit):
+class SpeechTextEdit(TextFileDropMixin, QPlainTextEdit):
     """Plain text editor that can highlight the sentence being spoken."""
 
     files_dropped = Signal(list)
@@ -85,27 +85,6 @@ class SpeechTextEdit(QPlainTextEdit):
             menu.insertSeparator(first)
         menu.exec(event.globalPos())
         menu.deleteLater()
-
-    # Dropping text files opens them (dropping text still inserts it).
-    def dragEnterEvent(self, event):  # noqa: N802
-        if dropped_text_files(event.mimeData()):
-            event.acceptProposedAction()
-            return
-        super().dragEnterEvent(event)
-
-    def dragMoveEvent(self, event):  # noqa: N802
-        if dropped_text_files(event.mimeData()):
-            event.acceptProposedAction()
-            return
-        super().dragMoveEvent(event)
-
-    def dropEvent(self, event):  # noqa: N802
-        files = dropped_text_files(event.mimeData())
-        if files:
-            event.acceptProposedAction()
-            self.files_dropped.emit(files)
-            return
-        super().dropEvent(event)
 
     def set_highlight_color(self, color):
         self._sentence_color = QColor(color)
@@ -209,6 +188,7 @@ class FindBar(QFrame):
         self.find_edit = QLineEdit()
         self.find_edit.setPlaceholderText("Find")
         self.find_edit.setClearButtonEnabled(True)
+        mute_clear_button(self.find_edit)
         self.case_btn = tool_button("case", "Match case", checkable=True)
         self.regex_btn = tool_button("regex", "Use regular expression", checkable=True)
         self.prev_btn = tool_button("chevron_up", "Previous match (Shift+Enter)")
@@ -339,7 +319,7 @@ class FindBar(QFrame):
     def replace_one(self):
         term = self.find_edit.text()
         cursor = self.editor.textCursor()
-        selected = cursor.selectedText()
+        selected = cursor.selectedText().replace("\u2029", "\n")  # how Qt writes a line break here
         if selected:
             try:
                 pattern = search.compile_pattern(term, **self._opts())
@@ -385,7 +365,7 @@ class EditorCard(QFrame):
         hl.setContentsMargins(16, 10, 10, 6)
         hl.setSpacing(8)
         self.doc_icon = QLabel()
-        self.title = QLabel("Untitled")
+        self.title = ElidedLabel("Untitled", Qt.ElideMiddle)
         self.title.setObjectName("CardTitle")
         self.modified = QFrame()
         self.modified.setObjectName("Dot")
@@ -394,7 +374,6 @@ class EditorCard(QFrame):
         self.modified.hide()
         self.counts = QLabel("0 words")
         self.counts.setObjectName("Muted")
-        from .widgets import action_button
 
         hl.addWidget(self.doc_icon)
         hl.addWidget(self.title)
@@ -412,6 +391,7 @@ class EditorCard(QFrame):
         lay.addWidget(self.editor, 1)
 
         self.wpm = 200  # for the reading time
+        self._words = self._chars = 0
         self._count_timer = QTimer(self)
         self._count_timer.setSingleShot(True)
         self._count_timer.timeout.connect(self._update_counts)
@@ -431,16 +411,23 @@ class EditorCard(QFrame):
 
     def set_wpm(self, wpm):
         self.wpm = max(1, int(wpm))
-        self._update_counts()
+        if not self._count_timer.isActive():  # or its count is on the way
+            self._show_counts()
 
     COMPACT_BELOW = 640  # narrower cards drop the character count
 
     def _update_counts(self):
+        self._count_timer.stop()  # this is the count it was waiting to do
         text = self.editor.toPlainText()
-        words = len(text.split())
+        self._words, self._chars = len(text.split()), len(text)
+        self._show_counts()
+
+    def _show_counts(self):
+        """From the last count: dragging the speed must not split the whole document at every step."""
+        words = self._words
         parts = [f"{words:,} word{'s' if words != 1 else ''}"]
         if self.width() >= self.COMPACT_BELOW:
-            parts.append(f"{len(text):,} characters")
+            parts.append(f"{self._chars:,} characters")
         if words:
             parts.append(reading_time(words, self.wpm))
         self.counts.setText("  ·  ".join(parts))
@@ -448,4 +435,4 @@ class EditorCard(QFrame):
     def resizeEvent(self, event):  # noqa: N802
         super().resizeEvent(event)
         if (event.oldSize().width() >= self.COMPACT_BELOW) != (event.size().width() >= self.COMPACT_BELOW):
-            self._update_counts()
+            self._show_counts()

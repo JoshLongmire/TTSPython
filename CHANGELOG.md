@@ -4,13 +4,22 @@
 - Measured against 4.1.0 on the same Windows PC (median of 10 runs):
   startup to first window 1012 ms -> 976 ms; idle memory 65 MB -> 130 MB (RSS), mostly the Qt interface and
   keeping the voice loaded for instant speech; Python packages about 197 MB larger (Qt replaces Pillow).
-  Tests: 283 pass (plus 5 on real audio and the desktop); 21 bug specs fail on 4.1.0 and pass on 5.0.0.
+  Tests: 387 pass (plus 5 on real audio and the desktop); 21 bug specs fail on 4.1.0 and pass on 5.0.0.
 - New interface built with Qt (PySide6), replacing tkinter. Every v4 control and setting is kept.
   Word-by-word highlighting (which v4 only did on Python 3.12 and older) is replaced by sentence highlighting
   that works everywhere.
   - Top bar with a Speak / Listen switch and icon buttons; editor card with live word and character counts;
     collapsible speech queue panel; media-player style control bar; status bar with the clipboard controls.
   - Crisp line icons that follow the theme, smooth switches, a live waveform, and sharp text on high-DPI screens.
+  - Layout pass, measured at the same window sizes: at the smallest window (760 x 500) the Speak / Listen switch is no
+    longer cut off (162 px given, 191 needed), the queue shows 3.7 rows instead of 2.5, and the control bar keeps its
+    progress and percentages. At the default size the editor gains 16 px (32 px in Listen), the queue about one more row, and the status
+    messages 595 px instead of 416. The waveform in the control bar now shows while speech plays (it was 0 px wide).
+    Volume shows its percent like speed. Slider handles are whole circles at every display scale, and radio buttons
+    are round. Shortcuts take 1097 px of scrolling instead of 1449, and voice names are no longer cut short in Settings.
+    Notices use the theme's colors. Speak or Queue in the status bar shows only while the clipboard is watched.
+  - Get more voices lines up sizes on the right, drops the repeated language from each row, and has a filter box.
+    Settings greys out what a switch has turned off, reopens on the page you last used, and its buttons look like buttons.
   - 12 themes: the 11 from v4 restyled, plus a new default, **Studio**. Every theme passes text contrast checks.
   - Settings window with side navigation: Appearance (theme gallery), Speech, Listen, Clipboard, Shortcuts,
     Mini mode and General.
@@ -104,6 +113,24 @@
 - Play queue starts at the selected item (or the top); double-click an item to play from it; pressing it while
   something is speaking switches to the queue instead of refusing.
 - Performance Mode is now off by default for new installs (your v4 setting is kept when imported).
+- Fixed while checking the whole code base, each with a test that failed before:
+  - A global hotkey with no modifier (for example just D) was accepted and would have taken that key from every other
+    app. Settings now asks for Ctrl, Alt or Shift.
+  - Replace all with a pattern that can match nothing (`x*`) wrote into every gap of the document; it now agrees with Find.
+  - Saving over a read-only file silently removed its protection. It is now refused, and the file is left alone.
+  - The mini bar's scroll wheel could only lower the volume on a touchpad.
+  - Reset to Defaults moved the speed and volume sliders without changing the speed and volume.
+  - Dropping text files on an empty queue did nothing; a match across lines could not be replaced one at a time.
+  - Saved queues are no longer written again at every start.
+  - Clearer messages: no internet, a device that does not respond, why Piper or the speech engine could not run, and
+    several unreadable files in one message. A paste that fails can no longer block later dictations from being typed.
+  - If the live preview stops working, you are told once and captions carry on from Whisper alone.
+  - Keyboard and screen readers: themes can be picked by keyboard, Enter works in the voice list, settings and sliders
+    are named, and the Play button's tooltip says what it will do now.
+- Faster: a speed slider step on a 5.4 MB document 47.5 ms -> 0.34 ms; loading a saved queue of 200 items 201 list
+  rebuilds -> 1; Cancel or Reset in Settings no longer restyles every window when the theme did not change (50 ms -> 0.1 ms).
+- Microphones that only record at a higher rate (such as 48 kHz): sound above what dictation can use no longer folds
+  back as noise (a 10 kHz test tone -1.4 dB -> -55 dB; speech frequencies unchanged, 0.1 ms per block).
 - Python 3.8 is no longer supported (Qt needs 3.9 or newer).
 - Voice, speed, volume, queue loop and panel layout are remembered between sessions.
 - Settings moved to `%APPDATA%\TTSPython\settings.json` (Linux: `~/.config/ttspython/settings.json`); your

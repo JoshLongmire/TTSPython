@@ -62,6 +62,7 @@ class AppController(QObject):
         self.current_doc = None
         self._refresh_requested = False
         self._settings_dialog = None
+        self._settings_page = "appearance"
         self._last_progress = None  # the download a model_status progress line belongs to
         self._voice_browser = None
         self._hotkey_errors = {}
@@ -74,6 +75,9 @@ class AppController(QObject):
         self._draft_timer.setSingleShot(True)
         self._draft_timer.setInterval(30_000)  # unsaved text is kept every 30 s (survives a crash)
         self._draft_timer.timeout.connect(self._write_recovery)
+        self._export_open_timer = QTimer(self)
+        self._export_open_timer.setSingleShot(True)
+        self._export_open_timer.setInterval(20_000)
         self._queue_save_timer = QTimer(self)
         self._queue_save_timer.setSingleShot(True)
         self._queue_save_timer.setInterval(1000)
@@ -137,7 +141,7 @@ class AppController(QObject):
         self._device_preset = services.get("devices")  # tests: a fixed device list, PortAudio untouched
         self._resolve_devices_async(self._device_preset)
         self._load_queue()
-        self._on_queue_changed()
+        self._refresh_queue()  # not saved: nothing has changed since the last save
         self._on_speech_state(State.IDLE)
         self._on_stt_state(SttState.IDLE)
         self._update_title()
@@ -185,7 +189,7 @@ class AppController(QObject):
         a("paste", "Paste", "paste", self.on_paste, "Paste clipboard text into the editor")
         a("clear", "Clear", "eraser", self.on_clear, "Clear the editor (undo with Ctrl+Z)")
         a("toggle_mode", "Switch Speak / Listen", None, self.on_toggle_mode)
-        a("toggle_queue", "Speech queue", "queue", self.on_toggle_queue, "Show or hide the speech queue", checkable=True)
+        a("toggle_queue", "Speech queue", "panel_right", self.on_toggle_queue, "Show or hide the speech queue", checkable=True)
         a("settings", "Settings", "settings", self.open_settings, "Settings")
         a("mini_mode", "Mini mode", "mini", self.toggle_mini, "Switch to the floating mini bar")
         a("queue_add_text", "Add text", "plus", self.queue_add_text, "Add the editor text to the queue")
@@ -211,9 +215,18 @@ class AppController(QObject):
             action.setShortcut(QKeySequence(seq) if seq else QKeySequence())
             base = action.toolTip().split("  (")[0]
             action.setToolTip(f"{base}  ({QKeySequence(seq).toString(QKeySequence.NativeText)})" if seq else base)
-        speak_seq = shortcuts.get("speak_all", "")
-        play_tip = "Play" + (f"  ({QKeySequence(speak_seq).toString(QKeySequence.NativeText)})" if speak_seq else "")
-        self.actions["play_pause"].setToolTip(play_tip)
+        self._update_play_tip()
+
+    def _update_play_tip(self):
+        """The Play button's tooltip says what pressing it will do now."""
+        state = self.speech.state
+        if self.settings["mode"] != "tts" and state is State.IDLE:
+            tip = "Switch to Speak to read text aloud"
+        else:
+            word = "Resume" if state is State.PAUSED else ("Play" if state is State.IDLE else "Pause")
+            seq = self.settings["shortcuts"].get("speak_all", "")
+            tip = word + (f"  ({QKeySequence(seq).toString(QKeySequence.NativeText)})" if seq else "")
+        self.actions["play_pause"].setToolTip(tip)
 
     def _apply_global_hotkeys(self):
         s = self.settings
@@ -281,6 +294,7 @@ class AppController(QObject):
         w.auto_queue.toggled.connect(self._set_auto_queue)
         w.perf_switch.toggled.connect(self._set_performance)
         w.splitter.splitterMoved.connect(lambda *_: self._remember_layout())
+        self._export_open_timer.timeout.connect(w.export_open.hide)
 
         self.mini.mic_clicked.connect(self.dictate_external)
         self.mini.play_clicked.connect(self.speak_clipboard)
@@ -314,6 +328,7 @@ class AppController(QObject):
             widget.blockSignals(True)
             widget.setChecked(value)
             widget.blockSignals(False)
+        w.fit_status_bar()  # the switches above were set without their signals
         w.clip_mode.set_value(s["clipboard_action"])
         self.editor.set_highlight_enabled(s["sentence_highlight"])
         self.mini.snap = s["mini_snap"]
@@ -471,13 +486,14 @@ class AppController(QObject):
         pp = self.actions["play_pause"]
         icons.apply(pp, "pause" if playing else "play", "on_accent", 22)
         pp.setText("Pause" if playing else ("Resume" if state is State.PAUSED else "Play"))
+        self._update_play_tip()
         self.actions["stop"].setEnabled(busy)
         self.actions["pause_resume"].setEnabled(busy)
         self.mini.set_speaking(busy)
         self.popover.set_speech_state(busy, state is State.PAUSED)
         self._update_tray()
         wave_src = self.speech.output_level if busy else None
-        self.window.transport.wave.set_source(wave_src)
+        self.window.transport.set_level_source(wave_src)
         if self.stt.state is not SttState.RECORDING:
             self.mini.wave.set_source(wave_src)
         now = self.window.transport.now
@@ -547,7 +563,8 @@ class AppController(QObject):
             return
         from .voice_browser import VoiceBrowser  # loaded on first use (downloads code is not needed at start)
 
-        dlg = VoiceBrowser(self.speech.voice_id, self._settings_dialog or self.window)
+        # Not a child of Settings: closing that would destroy this window in the middle of a download.
+        dlg = VoiceBrowser(self.speech.voice_id, self.window)
         dlg.setAttribute(Qt.WA_DeleteOnClose)
         dlg.voices_changed.connect(self.speech.refresh_voices)
         dlg.use_voice.connect(self._use_voice_from_browser)
@@ -652,15 +669,18 @@ class AppController(QObject):
         out_name = audio_devices.describe(self.settings["tts_output_device"]) if r["out_index"] is not None else "System default"
         in_name = audio_devices.describe(self.settings["stt_input_device"]) if r["in_index"] is not None else "System default"
         self.window.device_chip.setText(f"Output: {out_name}")
-        self.window.device_chip.setToolTip(f"Speech plays on: {out_name}")
+        self.window.device_chip.set_clickable(f"Speech plays on: {out_name}. Click to change.")
         self.window.listen_panel.mic_chip.setText(f"Mic: {in_name}")
 
     # ======================================================================
     # Queue
     # ======================================================================
     def _on_queue_changed(self):
-        self.window.queue_panel.set_items(self.queue.snapshot(), self.speech.playing_item_id)
+        self._refresh_queue()
         self._queue_save_timer.start()
+
+    def _refresh_queue(self):
+        self.window.queue_panel.set_items(self.queue.snapshot(), self.speech.playing_item_id)
         has = len(self.queue) > 0
         for key in ("queue_play", "queue_clear", "queue_remove", "queue_up", "queue_down"):
             self.actions[key].setEnabled(has)
@@ -682,17 +702,21 @@ class AppController(QObject):
         self.queue_add_paths(paths)
 
     def queue_add_paths(self, paths):
-        added = 0
+        entries, failures = [], []
         for path in paths:
             try:
                 content = textio.read_text(path).strip()
             except OSError as exc:
-                self._error("Queue", f"Could not read {os.path.basename(path)}: {exc}")
+                failures.append(f"{os.path.basename(path)}: {exc}")
                 continue
             if content:
-                self.queue.add(content, os.path.basename(path), "file")
-                added += 1
+                entries.append((content, os.path.basename(path), "file"))
+        if entries:
+            self.queue.add_many(entries)
+        if failures:
+            self._error("Queue", "Could not read " + "\n".join(failures))
         if paths:
+            added = len(entries)
             self._status(f"Added {added} file{'s' if added != 1 else ''} to the queue ({len(self.queue)} items)")
 
     def queue_play(self, item_id=None):
@@ -716,12 +740,12 @@ class AppController(QObject):
         menu.addSeparator()
         menu.addAction("Remove", lambda: (self.queue.remove(item_id), self._status(f"Removed from queue ({len(self.queue)} items)")))
         menu.exec(pos)
+        menu.deleteLater()
 
     def _queue_to_top(self, item_id):
         index = self.queue.index_of(item_id)
         if index > 0:
             self.queue.move(item_id, -index)
-            self.window.queue_panel.set_items(self.queue.snapshot(), self.speech.playing_item_id, item_id)
 
     def _queue_to_editor(self, item_id):
         item = self.queue.get(item_id)
@@ -741,9 +765,10 @@ class AppController(QObject):
                 items = json.load(f).get("items", [])
         except (OSError, ValueError, AttributeError):
             return
-        for item in items:
-            if isinstance(item, dict) and isinstance(item.get("text"), str) and item["text"].strip():
-                self.queue.add(item["text"], str(item.get("name") or preview(item["text"])), str(item.get("kind") or "text"))
+        self.queue.add_many(((item["text"], str(item.get("name") or preview(item["text"])), str(item.get("kind") or "text"))
+                             for item in items
+                             if isinstance(item, dict) and isinstance(item.get("text"), str) and item["text"].strip()),
+                            announce=False)
 
     def _save_queue(self):
         items = [{"text": i.text, "name": i.name, "kind": i.kind} for i in self.queue.snapshot()]
@@ -780,7 +805,6 @@ class AppController(QObject):
             self._toast("Select an item in the queue first.")
             return
         self.queue.move(item_id, delta)
-        self.window.queue_panel.set_items(self.queue.snapshot(), self.speech.playing_item_id, item_id)
 
     def on_queue_loop(self, checked):
         self.speech.loop = checked
@@ -964,6 +988,10 @@ class AppController(QObject):
         if self._settings_dialog is not None:
             self._settings_dialog.update_model_status()
 
+    def _settings_closed(self, dialog):
+        self._settings_page = dialog.current_page()
+        self._settings_dialog = None
+
     def _on_preview_status(self, text):
         """The instant preview downloads in the background and nothing waits on it: the status bar
         says how far it got, and only a failure is worth a notice."""
@@ -998,6 +1026,7 @@ class AppController(QObject):
         self.actions["speak_all"].setEnabled(tts)
         self.actions["speak_selected"].setEnabled(tts)
         self.actions["play_pause"].setEnabled(tts or self.speech.busy)
+        self._update_play_tip()
 
     def _confirm_discard(self):
         if not self.editor.document().isModified() or not self.editor.toPlainText():
@@ -1182,7 +1211,7 @@ class AppController(QObject):
         self._toast(f"Saved {os.path.basename(path)}")
         self._last_export = path
         self.window.export_open.show()
-        QTimer.singleShot(20_000, self.window.export_open.hide)
+        self._export_open_timer.start()  # starts over: the last export's time must not hide this one's
 
     def open_export_folder(self):
         if self._last_export:
@@ -1268,18 +1297,22 @@ class AppController(QObject):
         self.settings.set("mini_pos", self.mini.position_ref())
         self.save_soon()
 
-    def open_settings(self, page="appearance"):
+    def open_settings(self, page=None):
+        """On the page asked for, else the one last used (while the app runs)."""
         if self._settings_dialog is not None:
+            self.show_window()  # it stays hidden with a hidden main window
+            if page:
+                self._settings_dialog.show_page(page)
             self._settings_dialog.raise_()
             self._settings_dialog.activateWindow()
             return
         self.show_window()
-        dlg = SettingsDialog(self, self.window, page)
+        dlg = SettingsDialog(self, self.window, page or self._settings_page)
         dlg.setAttribute(Qt.WA_DeleteOnClose)
         dlg.saved.connect(self.apply_settings)
         dlg.preview_theme.connect(self.theme.apply)
         dlg.action_requested.connect(self._settings_action)
-        dlg.finished.connect(lambda _r: setattr(self, "_settings_dialog", None))
+        dlg.finished.connect(lambda _r: self._settings_closed(dlg))
         self._settings_dialog = dlg
         dlg.show()
 

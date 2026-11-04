@@ -4,13 +4,13 @@ from __future__ import annotations
 from PySide6.QtCore import QPoint, QRect, QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QFontMetrics, QGuiApplication, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import (
-    QFrame, QHBoxLayout, QLabel, QSlider, QToolButton, QVBoxLayout, QWidget,
+    QFrame, QHBoxLayout, QLabel, QToolButton, QVBoxLayout, QWidget,
 )
 
 from ..core.platform import IS_WINDOWS
 from ..core.settings import RATE_MAX, RATE_MIN, percent_wpm, speed_percent
 from . import icons
-from .widgets import ElidingComboBox, Waveform, voice_label
+from .widgets import ElidingComboBox, Slider, Waveform, fit_label, voice_label
 
 PILL_W, PILL_H, MARGIN = 272, 52, 10
 SNAP_DISTANCE, SNAP_GAP = 24, 8
@@ -28,7 +28,40 @@ def _pill_button(icon_name, tooltip, size=36, icon_size=18, role="text"):
     return btn
 
 
-class MiniPill(QWidget):
+class _NeverActivated:
+    """A window that clicks cannot bring to the front: the app being worked in keeps its focus."""
+
+    def showEvent(self, event):  # noqa: N802
+        super().showEvent(event)
+        if IS_WINDOWS:
+            from ..platform import winapi
+
+            winapi.apply_noactivate(int(self.winId()))
+
+    def nativeEvent(self, event_type, message):  # noqa: N802
+        if IS_WINDOWS and event_type == b"windows_generic_MSG":
+            from ..platform import winapi
+
+            msg = winapi.MSG.from_address(int(message))
+            if msg.message == winapi.WM_MOUSEACTIVATE:
+                return True, winapi.MA_NOACTIVATE
+        return False, 0
+
+
+def _paint_bubble(widget, tokens, radius):
+    p = QPainter(widget)
+    p.setRenderHint(QPainter.Antialiasing)
+    path = QPainterPath()
+    path.addRoundedRect(QRectF(widget.rect()).adjusted(0.5, 0.5, -0.5, -0.5), radius, radius)
+    p.fillPath(path, QColor(tokens["surface"]))
+    pen = QPen(QColor(tokens["border"]))
+    pen.setWidthF(1.0 * tokens.get("border_w", 1))
+    p.setPen(pen)
+    p.drawPath(path)
+    p.end()
+
+
+class MiniPill(_NeverActivated, QWidget):
     mic_clicked = Signal()
     play_clicked = Signal()
     expand_clicked = Signal()
@@ -46,6 +79,7 @@ class MiniPill(QWidget):
         self.setWindowTitle("TTSPython mini")
         self.setFixedSize(PILL_W + 2 * MARGIN, PILL_H + 2 * MARGIN)
         self.snap = True
+        self._wheel = 0  # part of a step, from a touchpad's small scrolls
         self._drag_offset = None
         self._tokens = {}
 
@@ -135,27 +169,11 @@ class MiniPill(QWidget):
         p.setPen(pen)
         p.drawPath(path)
 
-    # --- never take focus (Windows) -----------------------------------------------------
-    def showEvent(self, event):  # noqa: N802
-        super().showEvent(event)
-        if IS_WINDOWS:
-            from ..platform import winapi
-
-            winapi.apply_noactivate(int(self.winId()))
-
-    def nativeEvent(self, event_type, message):  # noqa: N802
-        if IS_WINDOWS and event_type == b"windows_generic_MSG":
-            from ..platform import winapi
-
-            msg = winapi.MSG.from_address(int(message))
-            if msg.message == winapi.WM_MOUSEACTIVATE:
-                return True, winapi.MA_NOACTIVATE
-        return False, 0
-
     def wheelEvent(self, event):  # noqa: N802
-        steps = event.angleDelta().y() // 120
-        if steps:
-            self.volume_step.emit(1 if steps > 0 else -1)
+        self._wheel += event.angleDelta().y()
+        if abs(self._wheel) >= 120:
+            self.volume_step.emit(1 if self._wheel > 0 else -1)
+            self._wheel = 0
 
     # --- dragging and snapping --------------------------------------------------------------
     def mousePressEvent(self, event):  # noqa: N802
@@ -253,35 +271,18 @@ class FloatingToast(QLabel):
         """New text for the notice on show (a download's next step): same place, no new pop-up."""
         if not self.isVisible() or self._anchor is None:
             return
-        self._fit(text)
+        fit_label(self, text)
         cx, bottom, top = self._anchor
         self.move(cx - self.width() // 2, bottom - self.height() if bottom is not None else top)
         self._timer.start(ms)
 
-    def _fit(self, text):
-        """One line when it fits, else wrapped at the widest size (adjustSize wraps far narrower)."""
-        self.setText(text)
-        m = self.contentsMargins()
-        width = min(self.maximumWidth(), QFontMetrics(self.font()).horizontalAdvance(text) + m.left() + m.right() + 2)
-        self.resize(width, self.heightForWidth(width))
-
     def paintEvent(self, event):  # noqa: N802
-        t = self._tokens
-        if t:
-            p = QPainter(self)
-            p.setRenderHint(QPainter.Antialiasing)
-            path = QPainterPath()
-            path.addRoundedRect(QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5), 12, 12)
-            p.fillPath(path, QColor(t["surface"]))
-            pen = QPen(QColor(t["border"]))
-            pen.setWidthF(1.0 * t.get("border_w", 1))
-            p.setPen(pen)
-            p.drawPath(path)
-            p.end()
+        if self._tokens:
+            _paint_bubble(self, self._tokens, 12)
         super().paintEvent(event)
 
     def show_near(self, widget, text, ms=3200):
-        self._fit(text)
+        fit_label(self, text)
         geo = widget.frameGeometry()
         screen = QGuiApplication.screenAt(geo.center()) or QGuiApplication.primaryScreen()
         area = screen.availableGeometry()
@@ -295,7 +296,7 @@ class FloatingToast(QLabel):
         self._present(x, y, ms)
 
     def show_in_corner(self, text, ms=3200):
-        self._fit(text)
+        fit_label(self, text)
         area = QGuiApplication.primaryScreen().availableGeometry()
         x, y = area.right() - self.width() - 24, area.bottom() - self.height() - 24
         self._anchor = (x + self.width() // 2, y + self.height(), None)
@@ -311,7 +312,7 @@ class FloatingToast(QLabel):
         self._timer.start(ms)
 
 
-class LiveCaption(QWidget):
+class LiveCaption(_NeverActivated, QWidget):
     """The words dictation has heard so far, in a bubble by the mini bar (never takes focus).
 
     Large text, as wide and as tall as the words need (up to MAX_WIDTH and LINES lines), the
@@ -466,34 +467,8 @@ class LiveCaption(QWidget):
             self.show()
 
     def paintEvent(self, _event):  # noqa: N802
-        t = self._tokens
-        if not t:
-            return
-        p = QPainter(self)
-        p.setRenderHint(QPainter.Antialiasing)
-        path = QPainterPath()
-        path.addRoundedRect(QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5), 14, 14)
-        p.fillPath(path, QColor(t["surface"]))
-        pen = QPen(QColor(t["border"]))
-        pen.setWidthF(1.0 * t.get("border_w", 1))
-        p.setPen(pen)
-        p.drawPath(path)
-
-    def showEvent(self, event):  # noqa: N802
-        super().showEvent(event)
-        if IS_WINDOWS:
-            from ..platform import winapi
-
-            winapi.apply_noactivate(int(self.winId()))
-
-    def nativeEvent(self, event_type, message):  # noqa: N802
-        if IS_WINDOWS and event_type == b"windows_generic_MSG":
-            from ..platform import winapi
-
-            msg = winapi.MSG.from_address(int(message))
-            if msg.message == winapi.WM_MOUSEACTIVATE:
-                return True, winapi.MA_NOACTIVATE  # clicking X must not take focus from the app
-        return False, 0
+        if self._tokens:
+            _paint_bubble(self, self._tokens, 14)
 
 
 class QuickPopover(QFrame):
@@ -525,7 +500,8 @@ class QuickPopover(QFrame):
         lay.addWidget(self.voice)
         lay.addWidget(section("Speed"))
         row = QHBoxLayout()
-        self.rate = QSlider(Qt.Horizontal)
+        self.rate = Slider()
+        self.rate.setAccessibleName("Speed")
         self.rate.setRange(speed_percent(RATE_MIN), speed_percent(RATE_MAX))
         self.rate.setSingleStep(5)
         self.rate_label = QLabel("100%")
@@ -537,7 +513,8 @@ class QuickPopover(QFrame):
         lay.addLayout(row)
         lay.addWidget(section("Volume"))
         vrow = QHBoxLayout()
-        self.volume = QSlider(Qt.Horizontal)
+        self.volume = Slider()
+        self.volume.setAccessibleName("Volume")
         self.volume.setRange(10, 100)
         self.volume_label = QLabel("100%")
         self.volume_label.setObjectName("Muted")

@@ -4,10 +4,10 @@ from __future__ import annotations
 import collections
 import os
 
-from PySide6.QtCore import QEasingCurve, QPoint, QPropertyAnimation, QRectF, QSize, Qt, QTimer, Property, Signal
-from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPainterPath
+from PySide6.QtCore import QEasingCurve, QEvent, QPoint, QPointF, QPropertyAnimation, QRectF, QSize, Qt, QTimer, Property, Signal
+from PySide6.QtGui import QAction, QColor, QFont, QFontMetrics, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import (
-    QAbstractButton, QButtonGroup, QComboBox, QFrame, QHBoxLayout, QLabel, QSizePolicy, QStyle,
+    QAbstractButton, QButtonGroup, QComboBox, QFrame, QHBoxLayout, QLabel, QSizePolicy, QSlider, QStyle,
     QStyleOptionComboBox, QStylePainter, QToolButton, QWidget,
 )
 
@@ -39,19 +39,44 @@ def action_button(action, variant="ghost", show_text=False, size=18):
     return btn
 
 
-def card(name="Card"):
-    frame = QFrame()
-    frame.setObjectName(name)
-    return frame
+def mute_clear_button(line_edit):
+    """The clear (x) in a text box in the theme's quiet color, not Qt's bright default. The caller
+    keeps line_edit: the actions, kept on it here, then follow theme changes."""
+    line_edit._clear_actions = line_edit.findChildren(QAction)
+    for action in line_edit._clear_actions:
+        icons.apply(action, "close", "muted", 14)
 
 
-def label(text="", name=None, muted=False):
-    lab = QLabel(text)
-    if name:
-        lab.setObjectName(name)
-    if muted:
-        lab.setProperty("muted", True)
-    return lab
+def fit_label(label, text):
+    """One line when it fits, else wrapped at the widest size (adjustSize wraps far narrower)."""
+    label.setText(text)
+    m = label.contentsMargins()
+    width = min(label.maximumWidth(), QFontMetrics(label.font()).horizontalAdvance(text) + m.left() + m.right() + 2)
+    label.resize(width, label.heightForWidth(width))
+
+
+class TextFileDropMixin:
+    """Text files dropped here go to files_dropped; any other drag is left to the widget."""
+
+    def dragEnterEvent(self, event):  # noqa: N802
+        if dropped_text_files(event.mimeData()):
+            event.acceptProposedAction()
+            return
+        super().dragEnterEvent(event)
+
+    def dragMoveEvent(self, event):  # noqa: N802
+        if dropped_text_files(event.mimeData()):
+            event.acceptProposedAction()
+            return
+        super().dragMoveEvent(event)
+
+    def dropEvent(self, event):  # noqa: N802
+        files = dropped_text_files(event.mimeData())
+        if files:
+            event.acceptProposedAction()
+            self.files_dropped.emit(files)
+            return
+        super().dropEvent(event)
 
 
 class Segmented(QFrame):
@@ -178,6 +203,38 @@ class ToggleSwitch(QAbstractButton):
             p.drawRoundedRect(track.adjusted(-2, -2, 2, 2), 11, 11)
 
 
+class Slider(QSlider):
+    """A horizontal slider whose handle is a whole circle at every display scale. A stylesheet
+    handle is cut off by its rectangle (flat top and bottom, uneven at 125%), so it is painted here;
+    the stylesheet only sets the sizes that dragging uses."""
+
+    HANDLE, RING, RADIUS = 16, 2.0, 6.5  # 7.5 px out from the center: half a pixel clear of its 16 px box
+
+    def __init__(self, parent=None):
+        super().__init__(Qt.Horizontal, parent)
+        self.setMinimumHeight(22)
+        self.setAttribute(Qt.WA_Hover)  # repaint when the mouse comes and goes
+
+    def handle_center(self):
+        span = self.width() - self.HANDLE
+        return QStyle.sliderPositionFromValue(self.minimum(), self.maximum(), self.value(), span) + self.HANDLE / 2
+
+    def paintEvent(self, _event):  # noqa: N802
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        x, y = self.handle_center(), self.height() / 2
+        accent = QColor(icons.color("line" if self.isEnabled() else "disabled"))
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(icons.color("track")))
+        p.drawRoundedRect(QRectF(0, y - 2, self.width(), 4), 2, 2)
+        p.setBrush(accent)
+        p.drawRoundedRect(QRectF(0, y - 2, x, 4), 2, 2)
+        p.setPen(QPen(accent, self.RING))
+        filled = self.isEnabled() and (self.underMouse() or self.isSliderDown() or self.hasFocus())
+        p.setBrush(accent if filled else QColor(icons.color("field")))
+        p.drawEllipse(QPointF(x, y), self.RADIUS, self.RADIUS)
+
+
 class Waveform(QWidget):
     """Scrolling level bars fed by a callable returning 0..1."""
 
@@ -276,17 +333,17 @@ class Toast(QLabel):
         self.setWordWrap(True)
         self.setAlignment(Qt.AlignCenter)
         self.setMaximumWidth(460)
+        self.setContentsMargins(14, 9, 14, 9)
         self.hide()
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
         self._timer.timeout.connect(self.hide)
 
     def show_message(self, text, ms=2600):
-        self.setText(text)
-        self.adjustSize()
+        fit_label(self, text)
         parent = self.parentWidget()
         x = (parent.width() - self.width()) // 2
-        y = parent.height() - self.height() - 96
+        y = parent.height() - self.height() - 112  # above the transport and status bars
         self.move(QPoint(max(8, x), max(8, y)))
         self.raise_()
         self.show()
@@ -314,7 +371,15 @@ class ElidingComboBox(QComboBox):
         super().__init__(parent)
         self.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
         self.setMinimumContentsLength(chars)
-        self.currentIndexChanged.connect(lambda _i: self.setToolTip(self.currentText()))
+
+    def minimumSizeHint(self):  # noqa: N802
+        hint = super().minimumSizeHint()  # as wide as asked for when there is room, narrower when not
+        return QSize(min(hint.width(), 130), hint.height())
+
+    def event(self, event):
+        if event.type() == QEvent.ToolTip:  # asked for here: lists are often filled with signals blocked
+            self.setToolTip(self.currentText())
+        return super().event(event)
 
     def paintEvent(self, _event):  # noqa: N802
         painter = QStylePainter(self)
@@ -352,6 +417,7 @@ class ElidedLabel(QLabel):
     def __init__(self, text="", mode=Qt.ElideRight, parent=None):
         super().__init__(parent)
         self._clickable = False
+        self._tip = ""
         self._mode = mode
         self._full = ""
         self.setMinimumWidth(40)
@@ -360,8 +426,7 @@ class ElidedLabel(QLabel):
 
     def setText(self, text):  # noqa: N802
         self._full = text
-        if not getattr(self, "_clickable", False):
-            self.setToolTip(text if self.fontMetrics().horizontalAdvance(text) > self.width() else "")
+        self._update_tip()
         self._elide()
         self.updateGeometry()
 
@@ -380,8 +445,14 @@ class ElidedLabel(QLabel):
 
     def set_clickable(self, tip):
         self._clickable = True
+        self._tip = tip
         self.setCursor(Qt.PointingHandCursor)
-        self.setToolTip(tip)
+        self._update_tip()
+
+    def _update_tip(self):
+        """The full text when it is shortened, and what a click does."""
+        cut = self._full if self.fontMetrics().horizontalAdvance(self._full) > self.width() else ""
+        self.setToolTip("\n".join(part for part in (cut, self._tip) if part))
 
     def mousePressEvent(self, event):  # noqa: N802
         if self._clickable and event.button() == Qt.LeftButton:
@@ -394,8 +465,7 @@ class ElidedLabel(QLabel):
 
     def resizeEvent(self, event):  # noqa: N802
         super().resizeEvent(event)
-        if not self._clickable:
-            self.setToolTip(self._full if self.fontMetrics().horizontalAdvance(self._full) > self.width() else "")
+        self._update_tip()
         self._elide()
 
 

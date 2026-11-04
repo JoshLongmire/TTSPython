@@ -14,6 +14,7 @@ from .widgets import AppMark, ElidedLabel, Segmented, Toast, ToggleSwitch, actio
 
 class MainWindow(QMainWindow):
     close_requested = Signal(object)  # QCloseEvent
+    STATUS_TEXT_ROOM = 300  # the status bar keeps this much for its messages
 
     def __init__(self, actions, parent=None):
         super().__init__(parent)
@@ -32,7 +33,7 @@ class MainWindow(QMainWindow):
 
         body = QWidget()
         bl = QVBoxLayout(body)
-        bl.setContentsMargins(16, 14, 16, 14)
+        bl.setContentsMargins(14, 12, 14, 12)
         bl.setSpacing(12)
         self.splitter = QSplitter(Qt.Horizontal)
         self.splitter.setChildrenCollapsible(False)
@@ -52,7 +53,7 @@ class MainWindow(QMainWindow):
         self.splitter.addWidget(self.queue_panel)
         self.splitter.setStretchFactor(0, 1)
         self.splitter.setStretchFactor(1, 0)
-        self.splitter.setSizes([900, 310])
+        self.splitter.setSizes([900, 300])
         bl.addWidget(self.splitter, 1)
         outer.addWidget(body, 1)
 
@@ -61,6 +62,7 @@ class MainWindow(QMainWindow):
 
         self._build_status_bar()
         self.toast = Toast(root)
+        self.fit_status_bar()
         for action in actions.values():
             self.addAction(action)
 
@@ -68,7 +70,7 @@ class MainWindow(QMainWindow):
     def _build_app_bar(self):
         bar = QFrame()
         bar.setObjectName("AppBar")
-        bar.setFixedHeight(58)
+        bar.setFixedHeight(52)
         lay = QHBoxLayout(bar)
         lay.setContentsMargins(18, 0, 14, 0)
         lay.setSpacing(10)
@@ -77,7 +79,6 @@ class MainWindow(QMainWindow):
         title.setObjectName("AppTitle")
         version = QLabel(f"v{__version__}")
         version.setObjectName("VersionChip")
-        self.version_chip = version
         center = Qt.AlignVCenter
         lay.addWidget(self.mark, 0, center)
         lay.addWidget(title, 0, center)
@@ -87,20 +88,23 @@ class MainWindow(QMainWindow):
         self.mode_switch.setToolTip("Speak reads text aloud. Listen turns your voice into text.")
         lay.addWidget(self.mode_switch, 0, center)
         lay.addStretch(1)
+        tools = QHBoxLayout()
+        tools.setSpacing(2)
         a = self.actions
         for key in ("open", "save", "save_as", "export"):
             btn = action_button(a[key])
             if key == "open":
                 self.open_button = btn
-            lay.addWidget(btn)
+            tools.addWidget(btn)
         sep = QFrame()
         sep.setFixedSize(1, 22)
         sep.setObjectName("VSep")
-        lay.addSpacing(2)
-        lay.addWidget(sep)
-        lay.addSpacing(2)
+        tools.addSpacing(6)
+        tools.addWidget(sep)
+        tools.addSpacing(6)
         for key in ("find", "mini_mode", "settings"):
-            lay.addWidget(action_button(a[key]))
+            tools.addWidget(action_button(a[key]))
+        lay.addLayout(tools)
         return bar
 
     def _build_status_bar(self):
@@ -121,10 +125,9 @@ class MainWindow(QMainWindow):
         sb.addPermanentWidget(self.export_cancel)
         sb.addPermanentWidget(self.export_open)
 
-        group = QFrame()
-        group.setObjectName("StatusGroup")
+        group = QWidget()
         gl = QHBoxLayout(group)
-        gl.setContentsMargins(10, 2, 6, 2)
+        gl.setContentsMargins(0, 0, 0, 0)
         gl.setSpacing(8)
         self.clip_switch = ToggleSwitch("Clipboard")
         self.clip_switch.setToolTip("Watch the clipboard and speak or queue copied text")
@@ -132,7 +135,7 @@ class MainWindow(QMainWindow):
         self.clip_mode.setObjectName("SegmentedSmall")
         self.clip_mode.setToolTip("What to do with copied text")
         self.auto_queue = ToggleSwitch("Auto-Queue")
-        self.auto_queue.setToolTip("Queue copied text while speech is already playing")
+        self.auto_queue.setToolTip("Queue copied text while speech is playing, and read the queue when reading ends")
         gl.addWidget(self.clip_switch)
         gl.addWidget(self.clip_mode)
         gl.addWidget(self.auto_queue)
@@ -147,6 +150,7 @@ class MainWindow(QMainWindow):
         self.device_chip.setMinimumWidth(120)
         self.device_chip.setMaximumWidth(220)
         sb.addPermanentWidget(self.device_chip)
+        self.clip_switch.toggled.connect(self.fit_status_bar)
 
     # --- helpers ------------------------------------------------------------------------
     def set_status(self, text):
@@ -167,12 +171,21 @@ class MainWindow(QMainWindow):
         self.transport.refresh_icons()
         self.mark.update()
 
+    def fit_status_bar(self, *_):
+        """Speak or Queue only means something while the clipboard is watched. In a narrow window the
+        output chip, then the Performance switch (both also in Settings), give way to the status text."""
+        watching = self.clip_switch.isChecked()
+        self.clip_mode.setVisible(watching)
+        room = self.width() - self.STATUS_TEXT_ROOM - self.clip_switch.sizeHint().width()
+        room -= self.auto_queue.sizeHint().width() + 8
+        if watching:
+            room -= self.clip_mode.minimumSizeHint().width() + 8
+        room -= self.perf_switch.sizeHint().width() + 8
+        self.perf_switch.setVisible(room >= 0)
+        self.device_chip.setVisible(room >= self.device_chip.minimumWidth() + 8)
+
     def resizeEvent(self, event):  # noqa: N802
-        # Narrow windows: the output chip, then the Performance switch (both also in Settings)
-        # give way so the clipboard controls never run off the edge.
-        width = event.size().width()
-        self.device_chip.setVisible(width >= 1000)
-        self.perf_switch.setVisible(width >= 880)
+        self.fit_status_bar()
         super().resizeEvent(event)
 
     def closeEvent(self, event):  # noqa: N802

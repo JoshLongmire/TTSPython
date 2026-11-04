@@ -16,7 +16,6 @@ _P = {
     "stop": '<rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor" stroke="none"/>',
     "speak_selected": '<path d="M4 7h10M4 12h7M4 17h9"/><path d="M17 9.5v5l3.5-2.5z" fill="currentColor"/>',
     "mic": '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M8.5 21h7"/>',
-    "record": '<circle cx="12" cy="12" r="6" fill="currentColor" stroke="none"/>',
     "folder_open": '<path d="M3.5 18.5V6a1.5 1.5 0 0 1 1.5-1.5h4l2 2.5h7.5A1.5 1.5 0 0 1 20 8.5V10"/><path d="M3.5 18.5l2.6-7.2A1.5 1.5 0 0 1 7.5 10.3H21l-2.8 7.4a1.5 1.5 0 0 1-1.4 1H3.5z"/>',
     "save": '<path d="M5 3.5h11l3.5 3.5v12A1.5 1.5 0 0 1 18 20.5H6A1.5 1.5 0 0 1 4.5 19V5A1.5 1.5 0 0 1 5 3.5z"/><path d="M8 3.5v5h7v-5M8 20.5v-6h8v6"/>',
     "save_as": '<path d="M12.5 20.5H6A1.5 1.5 0 0 1 4.5 19V5A1.5 1.5 0 0 1 6 3.5h10l3.5 3.5v4"/><path d="M8 3.5v5h7v-5"/><path d="M15 21l1-3.5 4.2-4.2a1.4 1.4 0 0 1 2 2L18 19.5z"/>',
@@ -36,7 +35,7 @@ _P = {
     "chevron_up": '<path d="M6 15l6-6 6 6"/>',
     "chevron_down": '<path d="M6 9l6 6 6-6"/>',
     "repeat": '<path d="M17 3.5l3 3-3 3"/><path d="M4 11.5V10a3.5 3.5 0 0 1 3.5-3.5H20M7 20.5l-3-3 3-3"/><path d="M20 12.5V14a3.5 3.5 0 0 1-3.5 3.5H4"/>',
-    "queue": '<path d="M4 6h11M4 12h11M4 18h7"/><path d="M17 15v6l4.5-3z" fill="currentColor"/>',
+    "panel_right": '<rect x="3.5" y="5" width="17" height="14" rx="2"/><path d="M14.5 5v14"/>',
     "refresh": '<path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3"/><path d="M19.5 4v4.5H15"/>',
     "voices": '<circle cx="9" cy="8" r="3.5"/><path d="M3 20a6 6 0 0 1 12 0"/><path d="M17.5 7.5a4 4 0 0 1 0 5M20 5a7.5 7.5 0 0 1 0 10"/>',
     "clipboard": '<rect x="5.5" y="4.5" width="13" height="16" rx="2"/><path d="M9 4.5V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v.5a1 1 0 0 1-1 1h-4a1 1 0 0 1-1-1z"/>',
@@ -62,7 +61,7 @@ _TEMPLATE = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="
 _cache = {}
 _registry = []
 _palette = {"text": "#e6e8ee", "muted": "#8b93a7", "accent": "#7c8cff", "on_accent": "#ffffff",
-            "danger": "#f87171", "disabled": "#555"}
+            "danger": "#f87171", "disabled": "#555", "line": "#7c8cff", "track": "#3a3f4b", "field": "#12141a"}
 
 
 def svg(name, color, width=1.8):
@@ -99,6 +98,7 @@ def set_palette(tokens):
     _palette.update({
         "text": tokens["text"], "muted": tokens["muted"], "accent": tokens["accent_text"],
         "on_accent": tokens["on_accent"], "danger": tokens["danger"], "disabled": tokens["disabled_text"],
+        "line": tokens["accent"], "track": tokens["scrollbar"], "field": tokens["field"],
     })
     _cache.clear()
     alive = []

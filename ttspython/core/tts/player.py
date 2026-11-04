@@ -20,6 +20,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from ..resample import resample
 from .stretch import Stretcher, speed_factor
 
 PAUSE_STOP_SECONDS = 10  # a stream paused this long is stopped (restarted on resume)
@@ -62,15 +63,6 @@ class _Segment:
         if self.stretcher is not None:
             return self.stretcher.remaining(speed_factor(target_wpm, self.native))
         return self.samples.size - self.offset
-
-
-def resample(samples, src_rate, dst_rate):
-    if src_rate == dst_rate or samples.size == 0:
-        return samples
-    n = max(1, int(round(samples.size * dst_rate / src_rate)))
-    x_old = np.linspace(0.0, 1.0, samples.size, endpoint=False)
-    x_new = np.linspace(0.0, 1.0, n, endpoint=False)
-    return np.interp(x_new, x_old, samples).astype(np.float32)
 
 
 class AudioPlayer:
@@ -128,10 +120,6 @@ class AudioPlayer:
     @property
     def level(self):
         return self._level
-
-    @property
-    def paused(self):
-        return self._paused
 
     def pause(self):
         self._paused = True
@@ -244,7 +232,7 @@ class AudioPlayer:
                 return
             if self._open_error is not None and "device changed" not in str(self._open_error):
                 break
-        raise RuntimeError(f"Could not open audio output: {self._open_error}")
+        raise RuntimeError(f"Could not open audio output: {self._open_error or 'the device did not respond'}")
 
     @staticmethod
     def _close_stream(stream):
