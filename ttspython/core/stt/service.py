@@ -78,7 +78,7 @@ _NUMBER_WORDS = ("zero one two three four five six seven eight nine ten eleven t
 
 def _plain(word):
     """Lower case without punctuation; Whisper's digits as the preview spells them ("3" -> "three")."""
-    plain = "".join(ch for ch in word.lower() if ch.isalnum() or ch == "'")
+    plain = "".join(ch for ch in word.lower().replace("\u2019", "'") if ch.isalnum() or ch == "'")
     return _NUMBER_WORDS[int(plain)] if plain.isdigit() and int(plain) < len(_NUMBER_WORDS) else plain
 
 
@@ -95,7 +95,7 @@ def _after_overlap(text, preview, longest=5, skip=2):
     ("week and we could" after "weekend we could"). If it only lines up without text's last
     word, that word was Whisper's guess at a half-heard word ("boards are so" while the
     preview says "boards are still in"), so the preview's version is shown instead."""
-    words = text.split()
+    words = [w for w in preview_mod.units(text) if _plain(w)]  # Chinese has no spaces, and its commas stand alone
     for guessed in (False, True):
         tail = (words[:-1] if guessed else words)[-longest:]
         for start in range(min(skip, len(preview)) + 1):
@@ -105,6 +105,12 @@ def _after_overlap(text, preview, longest=5, skip=2):
                 if all(_same_word(a, b) for a, b in zip(tail[-k:], preview[start:start + k])):
                     return preview[start + k:], guessed
     return preview, False
+
+
+def _without_last_word(text):
+    if text and preview_mod.is_cjk(text[-1]):
+        return text[:-1]
+    return text.rsplit(" ", 1)[0] if " " in text else ""
 
 
 def _block_converter(rate):
@@ -422,12 +428,12 @@ class SttService:
         self._settled_text = ""
         self._settled_samples = 0
         self._last_pass = None  # (settled_samples, end_samples, tail_text) of the newest live pass
-        self.preview_enabled = True  # instant preview words (English, once its model is downloaded)
+        self.preview_enabled = True  # instant preview words (where preview.py has a model, once it is downloaded)
         self.preview_factory = None  # tests: callable(on_words, on_pause) -> session with feed/stop
         self._preview = None
         self._preview_words = []
         self._preview_installing = False
-        self._preview_failed = False
+        self._preview_failed = set()  # languages to try again after a restart, not on every dictation
         self._checked = ("", 0.0)  # Whisper's text after the settled part, and the audio second it reaches
         self._pass_now = threading.Event()
         self._caption_lock = threading.Lock()
@@ -569,18 +575,18 @@ class SttService:
 
     # --- instant preview ------------------------------------------------------------------
     def preview_wanted(self):
-        return self.live and self.preview_enabled and self.language == "en"
+        return self.live and self.preview_enabled and preview_mod.supports(self.language)
 
     def _start_preview(self, session):
         """Feed the recorder's blocks to the instant preview, if it can run this time."""
         self._preview = None
         self.recorder.on_block = None
-        if not self.preview_wanted() or self._preview_failed:
+        if not self.preview_wanted() or self.language in self._preview_failed:
             return
         if self.preview_factory is None:
             if not preview_mod.available():
                 return
-            if not preview_mod.installed():
+            if not preview_mod.installed(self.language):
                 self._install_preview()
                 return
 
@@ -598,7 +604,8 @@ class SttService:
                 session_obj = self.preview_factory(on_words, on_pause)
             else:
                 rate = getattr(self.recorder, "capture_rate", self.recorder.sample_rate)
-                session_obj = preview_mod.PreviewSession(on_words, on_pause, convert=_block_converter(rate)).start()
+                session_obj = preview_mod.PreviewSession(on_words, on_pause, convert=_block_converter(rate),
+                                                         language=self.language).start()
         except Exception:
             log.exception("The live preview could not start")
             return
@@ -615,7 +622,7 @@ class SttService:
             return True
         self._preview = None
         self.recorder.on_block = None
-        self._preview_failed = True  # try again after a restart, not on every dictation
+        self._preview_failed.add(self.language)
         self.events.emit("preview_status", f"Live preview failed: {error}. Captions come from Whisper alone for now.")
         return False
 
@@ -627,7 +634,8 @@ class SttService:
 
     def _install_preview(self):
         """Download the preview model in the background (once); the next dictation uses it."""
-        if self._preview_installing or self._preview_failed:
+        language = self.language
+        if self._preview_installing or language in self._preview_failed:
             return
         self._preview_installing = True
 
@@ -636,10 +644,10 @@ class SttService:
 
         def run():
             try:
-                preview_mod.install(progress)
+                preview_mod.install(progress, language=language)
                 self.events.emit("preview_status", "Live preview ready")
             except Exception as exc:
-                self._preview_failed = True  # try again after a restart, not on every dictation
+                self._preview_failed.add(language)
                 self.events.emit("preview_status", f"Live preview download failed: {exc}")
             finally:
                 self._preview_installing = False
@@ -660,7 +668,7 @@ class SttService:
             newer = [w for w, start in self._preview_words if start >= reached - SEAM_SECONDS]
             newer, guessed = _after_overlap(f"{settled} {checked}", newer)
             if guessed and checked:  # Whisper's last word was a guess the preview has heard better
-                checked = checked.rsplit(" ", 1)[0] if " " in checked else ""
+                checked = _without_last_word(checked)
             self.events.emit("partial", settled, checked, " ".join(newer))
 
     # --- live captions ----------------------------------------------------------------------

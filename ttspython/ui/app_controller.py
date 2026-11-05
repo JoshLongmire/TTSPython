@@ -1483,7 +1483,7 @@ class AppController(QObject):
 
     def downloaded_models(self):
         models = stt_models.downloaded_models()
-        if stt_preview.installed():
+        if stt_preview.any_installed():
             models.append((PREVIEW_MODEL_LABEL, stt_preview.size_on_disk()))
         return models
 

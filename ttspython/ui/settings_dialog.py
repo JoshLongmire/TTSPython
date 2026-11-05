@@ -450,11 +450,13 @@ class SettingsDialog(QDialog):
         self.language = QComboBox()
         for code, label in settings_mod.STT_LANGUAGES:
             self.language.addItem(label, code)
-        self._row(lay, "Language", self.language, "English is fastest. Auto-detect works for any language.")
+        self._row(lay, "Language", self.language, "English is fastest. Auto-detect works for any language, without the instant preview.")
         self.live_preview = ToggleSwitch()
         self._row(lay, "Instant live preview", self.live_preview,
                   "While you dictate into another app, each word shows about half a second after you say it, "
-                  f"and Whisper corrects it. English only. Downloads {preview_mod.DOWNLOAD_MB} MB the first time.")
+                  "and Whisper corrects it. English, French and Chinese. "
+                  f"Downloads up to {max(preview_mod.download_mb(lang) for lang in preview_mod.MODELS)} MB "
+                  "the first time, for each language.")
         self._section(lay, "Memory")
         self.unload_idle = ToggleSwitch()
         self._row(lay, "Unload the model after each dictation", self.unload_idle, "Frees RAM right away.")

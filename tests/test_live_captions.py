@@ -437,7 +437,7 @@ def test_preview_model_is_downloaded_once_in_the_background(monkeypatch):
 
     calls = []
     monkeypatch.setattr(preview, "available", lambda: True)
-    monkeypatch.setattr(preview, "install", lambda progress=None, cancel=None: (calls.append(1), progress(36, 73)))
+    monkeypatch.setattr(preview, "install", lambda progress=None, cancel=None, language="en": (calls.append(1), progress(36, 73)))
     svc, model, events = make()
     svc.preview_enabled = True
     try:

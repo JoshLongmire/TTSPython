@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
 
 from ..core.platform import IS_WINDOWS
 from ..core.settings import RATE_MAX, RATE_MIN, percent_wpm, speed_percent
+from ..core.stt import preview as stt_preview
 from . import icons
 from .widgets import ElidingComboBox, Slider, Waveform, fit_label, voice_label
 
@@ -312,6 +313,16 @@ class FloatingToast(QLabel):
         self._timer.start(ms)
 
 
+def _joined(line, show):
+    """A line of the bubble: show(word, kind) for each word, with a space where the language has one."""
+    out = ""
+    previous = None
+    for word, kind in line:
+        out += (" " if previous is not None and stt_preview.spaced(previous, word) else "") + show(word, kind)
+        previous = word
+    return out
+
+
 class LiveCaption(_NeverActivated, QWidget):
     """The words dictation has heard so far, in a bubble by the mini bar (never takes focus).
 
@@ -400,7 +411,8 @@ class LiveCaption(_NeverActivated, QWidget):
     def lines(self):
         """[[(word, kind)]] for the lines on show: kind is "text", "preview" or "newest"."""
         settled, checked, preview = self._parts
-        words = [(w, "text") for w in f"{settled} {checked}".split()] + [(w, "preview") for w in preview.split()]
+        words = ([(w, "text") for w in stt_preview.units(f"{settled} {checked}")]
+                 + [(w, "preview") for w in stt_preview.units(preview)])
         if not words:
             return []
         words[-1] = (words[-1][0], "newest")
@@ -409,10 +421,11 @@ class LiveCaption(_NeverActivated, QWidget):
         lines, line, width = [], [], 0
         for word, kind in words:
             w = fm.horizontalAdvance(word)
-            if line and width + space + w > room:
+            gap = space if line and stt_preview.spaced(line[-1][0], word) else 0
+            if line and width + gap + w > room:
                 lines.append(line)
-                line, width = [], 0
-            width += (space if line else 0) + w
+                line, width, gap = [], 0, 0
+            width += gap + w
             line.append((word, kind))
         lines.append(line)
         return lines[-self.LINES:]
@@ -437,11 +450,11 @@ class LiveCaption(_NeverActivated, QWidget):
                 c = QColor(colors["preview"])
                 colors["preview"] = f"rgba({c.red()},{c.green()},{c.blue()},{c.alphaF():.2f})"
             html = "<br>".join(
-                " ".join(f'<span style="color:{colors[kind]}">{escape(word)}</span>' for word, kind in line)
+                _joined(line, lambda word, kind: f'<span style="color:{colors[kind]}">{escape(word)}</span>')
                 for line in lines)
         self.text.setText(html)
         fm = QFontMetrics(self.text.font())
-        widest = max((fm.horizontalAdvance(" ".join(w for w, _k in line)) for line in lines),
+        widest = max((fm.horizontalAdvance(_joined(line, lambda word, _kind: word)) for line in lines),
                      default=fm.horizontalAdvance("\u25cf  " + (self._status or "Listening...")))
         extra = 2 * self.PAD + self.cancel.width() + 10
         width = max(self.MIN_WIDTH if lines else 0, min(self.MAX_WIDTH, widest + extra + 4))

@@ -100,7 +100,7 @@ Download the latest build from [Releases](https://github.com/JoshLongmire/TTSPyt
   `espeak-ng`, `libportaudio2` and `libxcb-cursor0` from your distribution; the installer tells you if one is missing.
   Built on Ubuntu 22.04, so it runs on distributions from 2022 or newer.
 
-The first dictation downloads the Whisper model you picked (once) and the live preview model (73 MB, once, English only), and a Piper voice downloads when you pick it, so the app needs internet for those.
+The first dictation downloads the Whisper model you picked (once) and, for English, French or Chinese, the live preview model (73 to 134 MB, once per language), and a Piper voice downloads when you pick it, so the app needs internet for those.
 
 ### From source: Windows
 1. Install Python 3.10 or newer from [python.org](https://www.python.org/downloads/windows/) (tick **Add Python to PATH**).

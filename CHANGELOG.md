@@ -1,6 +1,10 @@
 # Changelog - TTSPython
 
 ## Unreleased
+- Instant live captions now also work in French and Chinese, and the Chinese model follows English words mixed in.
+  On real speech clips, words appeared 0.35 to 0.53 s (French) and 0.22 to 0.29 s (Chinese) after they were said.
+- Live captions show Chinese without spaces between characters, and wrap it properly.
+- Live captions no longer run two words together now and then ("havevegetarian").
 - New Windows installer: installs for your user with no administrator rights, adds a Start menu entry, and keeps
   your settings, voices and models when you upgrade or uninstall. The zip is still available.
 - Dictating into a slow app no longer risks pasting your old clipboard: it now comes back 1.5 seconds after the

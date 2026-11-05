@@ -62,7 +62,7 @@ def no_preview_download(monkeypatch):
     give the service a fake one)."""
     from ttspython.core.stt import preview
 
-    monkeypatch.setattr(preview, "installed", lambda: False)
+    monkeypatch.setattr(preview, "installed", lambda language="en": False)
     monkeypatch.setattr(preview, "install", lambda *a, **k: (_ for _ in ()).throw(OSError("no downloads in tests")))
 
 
