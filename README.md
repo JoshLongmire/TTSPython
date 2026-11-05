@@ -88,9 +88,13 @@ Work even when TTSPython is in the background. All can be changed in **Settings 
 
 ### Ready-to-run app (no Python needed)
 Download the latest build from [Releases](https://github.com/JoshLongmire/TTSPython/releases):
-- **Windows:** `TTSPython-<version>-windows-x64.zip`. Extract it anywhere and run `TTSPython\TTSPython.exe`.
-  The app is not code-signed, so SmartScreen may warn you: choose **More info > Run anyway**.
-  The folder also holds `LICENSE.txt` and `THIRD_PARTY_LICENSES.txt`.
+- **Windows installer:** `TTSPython-<version>-windows-x64-setup.exe`. Installs for your user, with no administrator
+  rights, adds a Start menu entry and can be removed in Windows Settings > Apps. Installing a new version over an old
+  one keeps your settings. Uninstalling keeps your settings, voices and models too; to remove those, delete the
+  `TTSPython` folders in `%APPDATA%` and `%LOCALAPPDATA%`.
+- **Windows zip:** `TTSPython-<version>-windows-x64.zip`. Extract it anywhere and run `TTSPython\TTSPython.exe`.
+- The app is not code-signed, so SmartScreen may warn you about either one: choose **More info > Run anyway**.
+  The app folder also holds `LICENSE.txt` and `THIRD_PARTY_LICENSES.txt`.
 - **Linux:** `TTSPython-<version>-linux-x86_64.tar.gz`. Extract it and run `TTSPython/install.sh` (installs for your
   user only: app menu entry and a `ttspython` command; `uninstall.sh` removes it). It also needs
   `espeak-ng`, `libportaudio2` and `libxcb-cursor0` from your distribution; the installer tells you if one is missing.

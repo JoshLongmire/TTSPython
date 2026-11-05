@@ -1,10 +1,11 @@
 """Build the standalone app for this OS.
 
-Windows: dist/TTSPython/TTSPython.exe, zipped as dist/TTSPython-<version>-windows-x64.zip
+Windows: dist/TTSPython/TTSPython.exe, zipped as dist/TTSPython-<version>-windows-x64.zip,
+         and with --installer also dist/TTSPython-<version>-windows-x64-setup.exe (needs Inno Setup 6)
 Linux:   dist/TTSPython/TTSPython, archived as dist/TTSPython-<version>-linux-x86_64.tar.gz
 PyInstaller cannot cross-compile, so each OS builds its own package.
 
-Usage: python packaging/build.py [--no-archive]
+Usage: python packaging/build.py [--no-archive] [--check] [--installer]
 """
 from __future__ import annotations
 
@@ -135,10 +136,41 @@ def self_test(app_dir):
     print("Self-test: no problems")
 
 
+def find_iscc():
+    """Inno Setup's compiler: the ISCC environment variable, PATH, or where its own installer puts it."""
+    if os.environ.get("ISCC"):
+        return os.environ["ISCC"]
+    found = shutil.which("iscc")
+    if found:
+        return found
+    for base in (os.environ.get("ProgramFiles(x86)"), os.environ.get("ProgramFiles"),
+                 os.path.join(os.environ.get("LOCALAPPDATA", ""), "Programs")):
+        path = os.path.join(base or "", "Inno Setup 6", "ISCC.exe")
+        if base and os.path.isfile(path):
+            return path
+    return None
+
+
+def installer_command(iscc, app_dir, icon, out_dir, version, extra=()):
+    return [iscc, "/Q", f"/DAppVersion={version}", f"/DAppDir={app_dir}", f"/DIconFile={icon}", f"/DOutDir={out_dir}",
+            *extra, os.path.join(HERE, "windows", f"{APP_NAME}.iss")]
+
+
+def make_installer(app_dir, icon, out_dir):
+    iscc = find_iscc()
+    if not iscc:
+        sys.exit("Inno Setup 6 was not found: install it, or set ISCC to its ISCC.exe")
+    subprocess.run(installer_command(iscc, app_dir, icon, out_dir, __version__), check=True)
+    setup = os.path.join(out_dir, f"{APP_NAME}-{__version__}-windows-x64-setup.exe")
+    print(f"Installer {setup} ({os.path.getsize(setup) / 1e6:.0f} MB)")
+    return setup
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--no-archive", action="store_true", help="Skip the .zip / .tar.gz")
     parser.add_argument("--check", action="store_true", help="Run the built app's self-test; fail if it finds a problem")
+    parser.add_argument("--installer", action="store_true", help="Windows: also build the installer (needs Inno Setup 6)")
     args = parser.parse_args(argv)
     windows = sys.platform == "win32"
     dist = os.path.join(ROOT, "dist")
@@ -165,6 +197,8 @@ def main(argv=None):
     print(f"\nBuilt {app_dir} ({folder_size(app_dir) / 1e6:.0f} MB) in {time.perf_counter() - t0:.0f} s")
     if args.check:
         self_test(app_dir)
+    if args.installer and windows:
+        make_installer(app_dir, os.path.join(work, "icon", f"{APP_NAME}.ico"), dist)
     if args.no_archive:
         return 0
     arch = "x64" if windows else platform.machine() or "x86_64"

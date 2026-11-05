@@ -1,6 +1,8 @@
 # Changelog - TTSPython
 
 ## Unreleased
+- New Windows installer: installs for your user with no administrator rights, adds a Start menu entry, and keeps
+  your settings, voices and models when you upgrade or uninstall. The zip is still available.
 - Dictating into a slow app no longer risks pasting your old clipboard: it now comes back 1.5 seconds after the
   paste instead of 0.4. If Windows blocks the paste, you are told right away.
 - Settings no longer asks about unsaved changes you did not make, or shows the wrong voice, when it opens before
