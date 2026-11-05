@@ -152,7 +152,7 @@ def _run_self_test(controller, out_path):
     import tempfile
 
     report = {"version": __version__, "frozen": bool(getattr(sys, "frozen", False))}
-    for name in ("sounddevice", "lameenc", "numpy", "ctranslate2", "onnxruntime", "faster_whisper"):
+    for name in ("sounddevice", "lameenc", "numpy", "ctranslate2", "onnxruntime", "faster_whisper", "sentencepiece"):
         try:
             importlib.import_module(name)
             report[name] = "ok"
@@ -232,8 +232,8 @@ def _run_self_test(controller, out_path):
 def self_test_problems(report):
     """What a self-test report says is broken, as "part: what happened". Empty when all is well."""
     problems = []
-    for key in ("sounddevice", "lameenc", "numpy", "ctranslate2", "onnxruntime", "faster_whisper", "vad_model",
-                "ui_automation", "preview_engine"):
+    for key in ("sounddevice", "lameenc", "numpy", "ctranslate2", "onnxruntime", "faster_whisper", "sentencepiece",
+                "vad_model", "ui_automation", "preview_engine"):
         if report.get(key, "ok") != "ok":
             problems.append(f"{key}: {report[key]}")
     for key in ("output_devices", "piper_catalog"):

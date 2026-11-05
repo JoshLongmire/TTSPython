@@ -220,6 +220,8 @@ class SpeechController:
         self.player.set_target_wpm(wpm)
         if self._rerender_timer is not None:
             self._rerender_timer.cancel()
+        if (self.voice_id or "").startswith("clone:"):
+            return  # that engine has one pace: rendering again would only cost seconds and sound the same
         self._rerender_timer = threading.Timer(RERENDER_DELAY, self._mark_dirty)
         self._rerender_timer.daemon = True
         self._rerender_timer.start()

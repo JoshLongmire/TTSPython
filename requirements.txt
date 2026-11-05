@@ -14,5 +14,8 @@ lameenc>=1.7
 faster-whisper>=1.1.0
 sherpa-onnx>=2.0.1  # instant live preview while dictating (its model downloads on first use)
 
+# Your own voice (optional model download; runs on the onnxruntime faster-whisper brings)
+sentencepiece>=0.2.0
+
 # Global hotkeys and typing at the cursor on Linux (X11)
 pynput>=1.7; sys_platform == "linux"

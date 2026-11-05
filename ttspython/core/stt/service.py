@@ -528,6 +528,16 @@ class SttService:
             text = f"Loading {self.model} model..."
         self.events.emit("model_status", text)
 
+    def transcribe_once(self, audio, language="en"):
+        """What Whisper hears in this float32 audio at 16 kHz. Blocks, loading the model first if needed.
+        For checking a recording, not dictation: nothing is typed and no event is sent."""
+        model = self._get_model()
+        segments, _ = model.transcribe(audio, language=language, beam_size=5, vad_filter=True,
+                                       condition_on_previous_text=False)
+        text = " ".join((seg.text or "").strip() for seg in segments).strip()
+        self._schedule_unload()
+        return text
+
     def _get_model(self):
         try:
             return self.cache.get(self.model, self._notify)

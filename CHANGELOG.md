@@ -1,6 +1,14 @@
 # Changelog - TTSPython
 
 ## Unreleased
+- New: your own voice. In **Settings > Speech > Get more voices > Make my voice**, read a short statement out loud and
+  the app makes a copy of your voice, on your computer. It only works from you reading the statement, with fresh code
+  words each time, so a voice cannot be made from a file or an old recording. The voice model is an optional 762 MB
+  download. On the test PC (Intel i5-12600K) it made speech 2.2 to 2.4 times as fast as it plays, using about 3 processor
+  cores and 1.2 GB of memory, which is released 2 minutes after speech ends. The first sentence takes about 3 seconds, or
+  about 10 after a pause while the model loads. Slower PCs may pause between sentences, and the app measures this and tells you.
+  A speaker recognition model scored three copies 0.80 to 0.90 against the real speaker (1 is identical) and at most
+  0.64 against other people. Only tested in English.
 - Instant live captions now also work in French and Chinese, and the Chinese model follows English words mixed in.
   On real speech clips, words appeared 0.35 to 0.53 s (French) and 0.22 to 0.29 s (Chinese) after they were said.
 - Live captions show Chinese without spaces between characters, and wrap it properly.

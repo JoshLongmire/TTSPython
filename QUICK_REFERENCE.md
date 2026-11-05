@@ -3,7 +3,7 @@
 ## At a glance
 
 - **Speak**: read text aloud with play, pause, stop, sentence highlighting, voice, speed, volume and output device. Speed, volume and voice change while it speaks.
-- **Voices**: system voices plus natural Piper voices from **Settings > Speech > Get more voices**.
+- **Voices**: system voices plus natural Piper voices from **Settings > Speech > Get more voices**, where **Make my voice** also copies your own voice from a statement you read out loud.
 - **Listen**: offline dictation into the editor, with a choice of Whisper model and language.
 - **Mini mode**: a floating bar that dictates into any app (with live captions) and reads highlighted text or the clipboard, without taking focus.
 - **Global hotkeys**: dictate, speak the clipboard or stop from anywhere.

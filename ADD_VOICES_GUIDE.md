@@ -33,6 +33,18 @@ Things to know:
   non-commercial use only, so check before using one for a commercial project.
 - Piper builds exist for Windows (64-bit), Linux on x86-64 and Linux on ARM64.
 
+## Your own voice
+
+**Settings > Speech > Get more voices > Make my voice** copies your voice, on your computer:
+
+1. Download the voice model once (762 MB).
+2. Press **Start recording**, read the statement on screen out loud, then press **Stop recording**.
+3. Press **Hear it**, then **Use this voice**.
+
+The statement has three code words that change on every try, and the recording has to say them, so a voice cannot be
+made from a file or from someone else's old recording. **Remove** deletes a voice and its recording. See the
+[README](README.md#your-own-voice) for what it needs from your computer.
+
 ## Windows voices
 
 Windows 10/11 comes with a few English voices (David, Zira and often Mark). TTSPython lists both the classic

@@ -34,7 +34,7 @@ def folder_size(path):
 
 # What requirements.txt brings in. PyAV is left out of the build (see TTSPython.spec).
 LICENSE_ROOTS = ("PySide6-Essentials", "pyttsx3", "comtypes", "pynput", "numpy", "sounddevice", "lameenc",
-                 "faster-whisper", "sherpa-onnx")
+                 "faster-whisper", "sherpa-onnx", "sentencepiece")
 NOT_BUNDLED = {"av"}
 NOTICE_INTRO = f"""{APP_NAME} is free software under the MIT License (see LICENSE.txt). It includes the components below,
 each under its own license.
@@ -46,8 +46,8 @@ CTranslate2 ships Intel's OpenMP runtime (libiomp5md.dll) and a small cuDNN load
 This package also includes Python (PSF License, https://docs.python.org/3/license.html) and PortAudio (MIT License,
 https://www.portaudio.com/license.html).
 
-Not included: Piper voices, the Piper program and the speech recognition models are downloaded only when you ask for
-them, and keep their own licenses. (Piper includes eSpeak NG, GPL-3.0, and runs as a separate program.)
+Not included: Piper voices, the Piper program, the speech recognition models and the voice model for your own voice
+(MOSS-TTS-Nano, Apache-2.0) are downloaded only when you ask for them, and keep their own licenses. (Piper includes eSpeak NG, GPL-3.0, and runs as a separate program.)
 """
 
 

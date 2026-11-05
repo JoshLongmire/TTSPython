@@ -70,6 +70,8 @@ class AppController(QObject):
         self._settings_page = "appearance"
         self._last_progress = None  # the download a model_status progress line belongs to
         self._voice_browser = None
+        self._clone_dialog = None
+        self._hearing_clone = False
         self._hotkey_errors = {}
         self._quitting = False
         self._voices = []
@@ -508,6 +510,8 @@ class AppController(QObject):
         if self.stt.state is not SttState.RECORDING:
             self.mini.wave.set_source(wave_src)
         now = self.window.transport.now
+        if state is State.STARTING and self._your_voice_is_loading():
+            self._toast("Loading your voice. The first sentence takes about 10 seconds.", 5000)
         if state is State.IDLE:
             self.editor.stop_tracking()
             self.window.transport.reset_progress("Ready")
@@ -520,6 +524,11 @@ class AppController(QObject):
         elif state is State.PLAYING and now.text() == "Paused":
             now.setText(self._progress_label)  # resumed: show the sentence again, not "Paused"
         self._apply_mode_enabled()
+
+    def _your_voice_is_loading(self):
+        from ..core.tts import clone  # the model itself loads only when it speaks
+
+        return (self.speech.voice_id or "").startswith(clone.PREFIX) and not clone.engine_loaded()
 
     def _on_queue_finished(self, stopped):
         self.window.queue_panel.set_playing(None)
@@ -562,6 +571,8 @@ class AppController(QObject):
         self._status(f"{len(voices)} voice{'s' if len(voices) != 1 else ''} ready")
         if self._voice_browser is not None:
             self._voice_browser.set_current(self.speech.voice_id)
+        if self._clone_dialog is not None and not self._hearing_clone:
+            self._clone_dialog.set_current(self.speech.voice_id)
 
     def on_refresh_voices(self):
         self._refresh_requested = True
@@ -579,9 +590,50 @@ class AppController(QObject):
         dlg.setAttribute(Qt.WA_DeleteOnClose)
         dlg.voices_changed.connect(self.speech.refresh_voices)
         dlg.use_voice.connect(self._use_voice_from_browser)
+        dlg.make_own_voice.connect(self.open_clone_dialog)
         dlg.destroyed.connect(lambda *_: setattr(self, "_voice_browser", None))
         self._voice_browser = dlg
         dlg.show()
+
+    def open_clone_dialog(self):
+        if self._clone_dialog is not None:
+            self._clone_dialog.raise_()
+            self._clone_dialog.activateWindow()
+            return
+        from .clone_dialog import CloneDialog  # loaded on first use
+
+        def busy():
+            return "" if self.stt.state is SttState.IDLE else "Finish dictating first: it is using the microphone."
+
+        # Not a child of Settings: closing that would destroy this window in the middle of a download.
+        dlg = CloneDialog(self.stt.transcribe_once, self.settings["tts_voice_id"], self.window,
+                          input_device=self.stt.input_device, busy_reason=busy)
+        dlg.setAttribute(Qt.WA_DeleteOnClose)
+        dlg.voices_changed.connect(self.speech.refresh_voices)
+        dlg.use_voice.connect(self._use_clone)
+        dlg.hear_voice.connect(self._hear_clone)
+        dlg.recording_started.connect(self.speech.stop)
+        dlg.destroyed.connect(lambda *_: self._clone_dialog_closed())
+        self._clone_dialog = dlg
+        dlg.show()
+
+    def _use_clone(self, vid):
+        self._hearing_clone = False
+        self._use_voice_from_browser(vid)
+
+    def _hear_clone(self, vid):
+        """Just a try: the voice in Settings stays as it is until "Use this voice"."""
+        self.speech.stop()
+        self.speech.set_voice(vid)
+        self._hearing_clone = True
+        self.speech.speak("This is how I sound when I read for you.", Source.TEST)
+
+    def _clone_dialog_closed(self):
+        self._clone_dialog = None
+        if self._hearing_clone:
+            self._hearing_clone = False
+            self.speech.stop()
+            self.speech.set_voice(self.settings["tts_voice_id"])
 
     def _use_voice_from_browser(self, vid):
         self._set_voice(vid)

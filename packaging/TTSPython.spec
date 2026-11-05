@@ -17,6 +17,7 @@ binaries = collect_dynamic_libs("ctranslate2")
 # Instant dictation preview. Its onnxruntime.dll must stay beside its module: Windows ships an
 # older onnxruntime.dll in System32 that it would load instead (and crash).
 binaries += collect_dynamic_libs("sherpa_onnx")
+binaries += collect_dynamic_libs("sentencepiece")  # your own voice
 hiddenimports = ["pyttsx3.drivers"]
 if WINDOWS:
     hiddenimports += ["pyttsx3.drivers.sapi5", "comtypes.stream"]

@@ -274,10 +274,10 @@ class Pyttsx3FileRenderer:
 
 
 class MultiRenderer:
-    """The system voices plus downloaded Piper voices; each render goes to the engine
-    that owns the voice (Piper voice ids start with "piper:")."""
+    """The system voices, downloaded Piper voices and the user's own cloned voices; each render goes
+    to the engine that owns the voice (ids start with "piper:" or "clone:")."""
 
-    def __init__(self, system, piper=None, system_voices=None):
+    def __init__(self, system, piper=None, system_voices=None, clone=None):
         self.system = system
         self._system_voices = system_voices  # already listed while choosing the engine
         if piper is None:
@@ -285,17 +285,24 @@ class MultiRenderer:
 
             piper = PiperRenderer()
         self.piper = piper
+        if clone is None:
+            from .clone import CloneRenderer
+
+            clone = CloneRenderer()
+        self.clone = clone
         self.name = system.name
         self.sample_rate = system.sample_rate
 
     def _engine(self, voice_id):
-        return self.piper if voice_id and voice_id.startswith("piper:") else self.system
+        if voice_id and voice_id.startswith("piper:"):
+            return self.piper
+        return self.clone if voice_id and voice_id.startswith("clone:") else self.system
 
     def list_voices(self):
         system, self._system_voices = self._system_voices, None
         if system is None:
             system = self.system.list_voices()
-        return list(system) + self.piper.list_voices()
+        return list(system) + self.piper.list_voices() + self.clone.list_voices()
 
     def warm_up(self, wpm):
         """Pay the system engine's one-time costs (a Piper voice starts on first use)."""

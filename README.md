@@ -24,6 +24,7 @@ A free, open-source, offline text-to-speech (TTS) and speech-to-text (STT) deskt
 - The sentence being read is **highlighted** and the editor follows along.
 - **Speed** (50% to 200%, 100% is normal) and **volume** change **while it speaks**: drag the speed slider and you hear every step as you drag (within 16 ms), mid-sentence, with the same pitch. Changing the **voice** mid-sentence continues from the word being read.
 - **More voices:** besides the system voices (including the Windows 11 voices Windows hides from older apps, such as Mark), **Settings > Speech > Get more voices** downloads natural-sounding **Piper** voices: dozens in English and many other languages, about 60 MB each, downloaded once and then fully offline.
+- **Your own voice:** read a short statement out loud and the app makes a copy of your voice, entirely on your computer. See [Your own voice](#your-own-voice).
 - Choose the **output device** in Settings (speakers, headset, virtual cable); every device from every audio system is listed, and **Refresh** finds one you plugged in later.
 - Speech starts within a fraction of a second, even for very long texts, because it is prepared a few seconds ahead of what you hear.
 
@@ -81,7 +82,7 @@ Work even when TTSPython is in the background. All can be changed in **Settings 
 ## Requirements
 - **Windows 10/11** or **Linux** (X11 or Wayland). Linux is a preview in 5.0: it is built and smoke-tested automatically, but has had less hands-on testing than Windows, so please report what you find.
 - To run from source: Python 3.10 or newer (developed on 3.13; the full test suite also passes on 3.10).
-- Python packages (installed by the scripts below): `PySide6-Essentials`, `pyttsx3`, `numpy`, `sounddevice`, `lameenc`, `faster-whisper`, `sherpa-onnx` (the instant live preview); on Windows also `comtypes` (talks to the SAPI5 voices; pyttsx3 brings `pywin32` for its fallback driver); on Linux also `pynput`.
+- Python packages (installed by the scripts below): `PySide6-Essentials`, `pyttsx3`, `numpy`, `sounddevice`, `lameenc`, `faster-whisper`, `sherpa-onnx` (the instant live preview), `sentencepiece` (your own voice); on Windows also `comtypes` (talks to the SAPI5 voices; pyttsx3 brings `pywin32` for its fallback driver); on Linux also `pynput`.
 - Linux system packages: `espeak-ng`, `portaudio`, `xcb-util-cursor` (Debian/Ubuntu: `libxcb-cursor0`). Optional: `wtype` to type dictation at the cursor on Wayland.
 
 ## Installation
@@ -100,7 +101,7 @@ Download the latest build from [Releases](https://github.com/JoshLongmire/TTSPyt
   `espeak-ng`, `libportaudio2` and `libxcb-cursor0` from your distribution; the installer tells you if one is missing.
   Built on Ubuntu 22.04, so it runs on distributions from 2022 or newer.
 
-The first dictation downloads the Whisper model you picked (once) and, for English, French or Chinese, the live preview model (73 to 134 MB, once per language), and a Piper voice downloads when you pick it, so the app needs internet for those.
+The first dictation downloads the Whisper model you picked (once) and, for English, French or Chinese, the live preview model (73 to 134 MB, once per language), a Piper voice downloads when you pick it, and the model for your own voice (762 MB) downloads when you ask for it, so the app needs internet for those.
 
 ### From source: Windows
 1. Install Python 3.10 or newer from [python.org](https://www.python.org/downloads/windows/) (tick **Add Python to PATH**).
@@ -169,9 +170,23 @@ With the ready-to-run app, use `TTSPython.exe --mini` (Windows) or `ttspython --
 
 ### Adding voices
 - **Natural voices (Windows and Linux):** **Settings > Speech > Get more voices**, pick a language and a voice, press **Download**, then **Use this voice**. The first one also downloads the Piper program (about 23 MB). **Hear samples online** opens the official samples page. Voices are stored in `%LOCALAPPDATA%\TTSPython` (Windows) or `~/.local/share/ttspython` (Linux) and can be removed again in the same window.
+- **Your own voice:** the same window has **Make my voice**. See [Your own voice](#your-own-voice).
 - **Windows voices:** the same window opens Windows Speech settings (`ms-settings:speech`); install voices there, then press **Refresh**.
 - **Linux system voices:** install espeak-ng language data with your package manager, then press **Refresh**.
 - See [`ADD_VOICES_GUIDE.md`](ADD_VOICES_GUIDE.md) for details. Run `python check_voices.py` to list installed voices.
+
+### Your own voice
+**Settings > Speech > Get more voices > Make my voice** copies your voice:
+1. Download the voice model once (762 MB).
+2. Press **Start recording**, read the statement on screen out loud, then press **Stop recording**. The app checks that the recording says the statement, makes the voice, and tells you how quickly this computer can speak in it.
+3. Press **Hear it** to try it, or **Use this voice** to read with it.
+
+It is for your own voice only. The statement says that you agree to the copy and includes three code words that change on every try. There is no way to make a voice from a file, so a clip of someone else or an old recording will not work.
+
+- **Privacy:** the recording, the voice and all the speech stay on your computer, in `%LOCALAPPDATA%\TTSPython\cloned-voices` (Windows) or `~/.local/share/ttspython/cloned-voices` (Linux). **Remove** deletes a voice and its recording. **Delete the voice model** frees the disk space and keeps your voices.
+- **What it needs:** on the test PC (Intel i5-12600K) it makes speech 2.2 to 2.4 times as fast as it plays, using about 3 processor cores and 1.2 GB of memory, which is released 2 minutes after speech ends. On a slower or busy computer it may pause between sentences; the app measures this when it makes the voice; exporting to a file is not affected, it only takes longer.
+- **Waiting:** speech starts about 3 seconds after you press Play, or about 10 seconds after a pause while the model loads, because each sentence is made in full before it plays.
+- **Limits:** only tested in English, and not yet with a real microphone in a real room. Very short phrases sometimes gain a stray word (6 of 42 tries with one to three words, such as "Yes. All of them."), and digit strings such as phone numbers can come out wrong (555-0142 was heard as 535-042), so check anything important. Longer sentences had about 1.5% of words heard wrong.
 
 ## Keyboard shortcuts (in the window)
 
@@ -298,6 +313,9 @@ engine and other components under their own licenses, listed in its `THIRD_PARTY
 Piper voices are spoken by the official [Piper](https://github.com/rhasspy/piper) program (MIT, with espeak-ng under
 GPL-3.0), which TTSPython downloads and runs as a separate program; it is not part of TTSPython. Each voice has its
 own license (see its model card on [Hugging Face](https://huggingface.co/rhasspy/piper-voices)).
+
+Your own voice is spoken by [MOSS-TTS-Nano](https://github.com/OpenMOSS/MOSS-TTS-Nano) (Apache-2.0) from the OpenMOSS team,
+which TTSPython downloads when you ask for it and runs with ONNX Runtime; it is not part of TTSPython.
 
 ## Changelog
 

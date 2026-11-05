@@ -365,7 +365,7 @@ class SettingsDialog(QDialog):
         voices_row.addWidget(self.voice)
         voices_row.addWidget(refresh)
         voices_row.addWidget(add)
-        self._row(lay, "Voice", voices_row, "This computer's voices and the natural voices you downloaded.")
+        self._row(lay, "Voice", voices_row, "This computer's voices, the natural voices you downloaded and your own.")
         self.rate = Slider()
         self.rate.setRange(settings_mod.speed_percent(settings_mod.RATE_MIN), settings_mod.speed_percent(settings_mod.RATE_MAX))
         self.rate.setSingleStep(5)

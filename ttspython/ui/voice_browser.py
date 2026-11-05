@@ -67,6 +67,7 @@ class _Relay(QObject):
 class VoiceBrowser(QDialog):
     voices_changed = Signal()  # a voice was downloaded or removed
     use_voice = Signal(str)
+    make_own_voice = Signal()
 
     def __init__(self, current_voice_id="", parent=None, installer=piper.install_voice, remover=piper.remove_voice):
         super().__init__(parent)
@@ -143,6 +144,16 @@ class VoiceBrowser(QDialog):
             add.clicked.connect(plat.open_voice_settings)
             system_row.addWidget(add)
         lay.addLayout(system_row)
+
+        own = QLabel("Your own voice: read a short statement out loud and this computer makes a copy of it.")
+        own.setObjectName("Muted")
+        own.setWordWrap(True)
+        self.own_btn = QPushButton("Make my voice")
+        self.own_btn.clicked.connect(self.make_own_voice)
+        own_row = QHBoxLayout()
+        own_row.addWidget(own, 1)
+        own_row.addWidget(self.own_btn)
+        lay.addLayout(own_row)
 
         buttons = QHBoxLayout()
         self.download_btn = QPushButton("Download")
