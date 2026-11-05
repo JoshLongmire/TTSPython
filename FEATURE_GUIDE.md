@@ -43,7 +43,8 @@
 ## Mini mode
 
 - A compact bar that floats above every window. It **never takes keyboard focus**, so the app you were typing in keeps its cursor.
-- **Mic**: dictate into whatever app you are using. The text is typed at the cursor. Your clipboard is restored afterwards, and the dictated text is kept out of Windows clipboard history. If the paste fails, or the window runs as administrator (which ignores simulated typing), the text stays on the clipboard and you are told.
+- **Mic**: dictate into whatever app you are using. The text is typed at the cursor. Your clipboard comes back about 1.5 seconds later, and the dictated text is kept out of Windows clipboard history. If the paste fails, or the window runs as administrator (which ignores simulated typing), the text stays on the clipboard and you are told.
+- **Cancel**: while a dictation model downloads for the first time, Listen shows a **Cancel** button. It stops the download and throws the recording away; the download starts again the next time you dictate.
 - **Play**: reads the text you have highlighted in the app you are using, or the clipboard when nothing is highlighted. Press again to stop.
 - **Waveform**: shows your voice while dictating and the speech while reading.
 - **Chevron or right-click**: a popover for voice, speed and volume, **Pause/Resume**, and Hide mini mode.

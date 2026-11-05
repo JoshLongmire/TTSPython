@@ -214,9 +214,15 @@ def _sink():
     return _SINK[0]
 
 
-def _progress_class(bars):
+class DownloadCancelled(Exception):
+    """The user cancelled while a model was downloading."""
+
+
+def _progress_class(bars, cancel=None):
     """A huggingface_hub progress bar that prints nothing but keeps counting, so the
-    download can be reported in the app. Every bar it creates is added to bars."""
+    download can be reported in the app. Every bar it creates is added to bars. Once
+    cancel is set, its next step raises, which stops the download; what arrived is kept
+    for next time."""
     from huggingface_hub.utils import tqdm as hf_tqdm
 
     class Progress(hf_tqdm):
@@ -226,14 +232,20 @@ def _progress_class(bars):
             super().__init__(*args, **kwargs)
             bars.append(self)
 
+        def update(self, n=1):
+            if cancel is not None and cancel.is_set():
+                raise DownloadCancelled
+            return super().update(n)
+
     return Progress
 
 
-def download_whisper(name, progress=None):
+def download_whisper(name, progress=None, cancel=None):
     """Return the local folder of Whisper model name, downloading it first if needed.
 
     progress(done_mb, total_mb, seconds) is called about once a second while downloading;
     done_mb is None when this huggingface_hub version does not report bytes.
+    Setting the cancel event raises DownloadCancelled at once.
     """
     import time
 
@@ -263,11 +275,28 @@ def download_whisper(name, progress=None):
 
     if progress is not None:
         threading.Thread(target=watch, name="stt-download-progress", daemon=True).start()
-    try:
+    outcome = {}
+
+    def fetch():
         try:
-            return snapshot_download(repo, allow_patterns=WHISPER_FILES, tqdm_class=_progress_class(bars))
-        except TypeError:  # an older huggingface_hub without tqdm_class
-            return snapshot_download(repo, allow_patterns=WHISPER_FILES)
+            try:
+                outcome["path"] = snapshot_download(repo, allow_patterns=WHISPER_FILES, tqdm_class=_progress_class(bars, cancel))
+            except TypeError:  # an older huggingface_hub without tqdm_class
+                outcome["path"] = snapshot_download(repo, allow_patterns=WHISPER_FILES)
+        except BaseException as exc:
+            outcome["error"] = exc
+
+    # On its own thread, so that cancelling never has to wait for a stalled connection.
+    fetcher = threading.Thread(target=fetch, name="stt-download", daemon=True)
+    fetcher.start()
+    try:
+        while fetcher.is_alive():
+            fetcher.join(0.1)
+            if cancel is not None and cancel.is_set():
+                raise DownloadCancelled
+        if "error" in outcome:
+            raise outcome["error"]
+        return outcome["path"]
     finally:
         done.set()
 
@@ -310,7 +339,7 @@ class _Worker:
 class ModelCache:
     """Holds at most one Whisper model; a different name replaces it.
 
-    downloader(name, progress) returns the model's local folder, fetching it first if needed.
+    downloader(name, progress, cancel) returns the model's local folder, fetching it first if needed.
     By default only the real Whisper loader gets one (test loaders never touch the network).
     """
 
@@ -321,6 +350,7 @@ class ModelCache:
         self._name = None
         self._model = None
         self._release_after_load = False
+        self.cancel_download = threading.Event()
 
     @property
     def loaded_name(self):
@@ -336,7 +366,7 @@ class ModelCache:
             gc.collect()
             path = None
             if self._downloader is not None:
-                path = self._downloader(name, (lambda *a: notify("download", *a)) if notify else None)
+                path = self._downloader(name, (lambda *a: notify("download", *a)) if notify else None, self.cancel_download)
             if notify:
                 notify("load")
             # A local folder also skips the online update check WhisperModel(name) makes on every load.
@@ -459,6 +489,7 @@ class SttService:
                 self._checked = ("", 0.0)
                 self._preview_words = []
                 self._pass_now.clear()
+                self.cache.cancel_download.clear()
                 self._session += 1
                 session = self._recording = self._session
                 self._set_state(SttState.RECORDING)
@@ -501,6 +532,8 @@ class SttService:
         try:
             self._get_model()
             self.events.emit("model_status", f"{self.model} model ready")
+        except DownloadCancelled:
+            pass  # the user knows: cancel() said so
         except Exception as exc:
             # Remembered so the transcription does not repeat the same slow failing load.
             self._load_failed = (self.model, exc)
@@ -525,6 +558,7 @@ class SttService:
                 return False
             self._session += 1
             self._cancelled = True
+            self.cache.cancel_download.set()
             if self._state is SttState.RECORDING:
                 self.recorder.stop()
                 self._stop_preview()
@@ -762,6 +796,8 @@ class SttService:
                 self.events.emit("transcript_ready", text, target)
             else:
                 self.events.emit("model_status", "No speech detected")
+        except DownloadCancelled:
+            pass  # the user knows: cancel() said so
         except Exception as exc:
             self.events.emit("error", f"Failed to transcribe: {exc}")
         finally:

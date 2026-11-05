@@ -14,7 +14,7 @@ from PySide6.QtGui import QGuiApplication
 from ..core.platform import IS_WINDOWS, child_env, session_type
 
 MAX_SNAPSHOT_BYTES = 256 * 1024 * 1024
-RESTORE_DELAY_MS = 400
+RESTORE_DELAY_MS = 1500  # a slow app reads the clipboard well after the keystroke; too soon and it pastes the old one
 MODIFIER_WAIT_MS = 600
 WIN_PRIVATE_FORMATS = {
     'application/x-qt-windows-mime;value="ExcludeClipboardContentFromMonitorProcessing"': b"\x00\x00\x00\x00",
@@ -119,7 +119,7 @@ class TextInjector(QObject):
                 sent = winapi.send_paste(self.keystroke)
             except OSError:
                 sent = False
-            QTimer.singleShot(RESTORE_DELAY_MS, lambda: restore(sent))
+            QTimer.singleShot(RESTORE_DELAY_MS if sent else 0, lambda: restore(sent))
 
         def restore(sent):
             # Not pasted: the text stays on the clipboard, or it would be lost.

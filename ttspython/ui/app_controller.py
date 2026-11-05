@@ -217,7 +217,12 @@ class AppController(QObject):
         for key in SHORTCUT_ACTIONS:
             action = self.actions[key]
             seq = shortcuts.get(key, "")
-            action.setShortcut(QKeySequence(seq) if seq else QKeySequence())
+            sequences = [QKeySequence(seq)] if seq else []
+            # Qt treats the numpad's Enter as another key; it does what Enter does unless it was bound itself.
+            numpad = seq[:-len("Return")] + "Enter" if seq.endswith("Return") else None
+            if numpad and numpad not in shortcuts.values():
+                sequences.append(QKeySequence(numpad))
+            action.setShortcuts(sequences)
             base = action.toolTip().split("  (")[0]
             action.setToolTip(f"{base}  ({QKeySequence(seq).toString(QKeySequence.NativeText)})" if seq else base)
         self._update_play_tip()
@@ -308,6 +313,7 @@ class AppController(QObject):
         self.mini.volume_step.connect(self._volume_step)
         self.popover.pause_clicked.connect(self.on_pause_resume)
         self.caption.cancel_clicked.connect(self.cancel_dictation)
+        self.window.listen_panel.cancel.clicked.connect(self.cancel_dictation)
         self.mini.moved.connect(self._remember_mini)
         self.popover.voice_changed.connect(self._set_voice)
         self.popover.rate_changed.connect(self._set_rate)
@@ -911,6 +917,7 @@ class AppController(QObject):
         """The caption's X or Esc: throw the recording away, nothing is typed."""
         self.stt.cancel()
         self.caption.hide()
+        self.window.listen_panel.cancel.hide()
 
     def _caption_wanted(self):
         """The bubble is for dictating into other apps; the editor shows its own text."""
@@ -951,6 +958,7 @@ class AppController(QObject):
             self.caption.set_status("Typing it in...")
         elif not recording and not transcribing:
             self.caption.hide()
+            panel.cancel.hide()
         hotkeys_follow = recording != self._esc_registered
         if hotkeys_follow:
             self._esc_registered = recording and self._caption_wanted()
@@ -980,6 +988,7 @@ class AppController(QObject):
 
     def _on_model_status(self, text):
         self._status(text)
+        self.window.listen_panel.cancel.setVisible(bool(_progress_key(text)))
         if self.stt.state is not SttState.RECORDING:
             # A model message while it lasts ("Loading small model..."), then back to the state.
             self.window.listen_panel.title.setText(text if "..." in text else self._stt_title())

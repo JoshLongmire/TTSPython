@@ -285,7 +285,7 @@ def test_first_dictation_reports_the_model_download():
 
     release, loaded_from = threading.Event(), []
 
-    def downloader(name, progress):
+    def downloader(name, progress, cancel):
         progress(120, 484, 3)
         release.wait(5)
         return "C:/models/" + name

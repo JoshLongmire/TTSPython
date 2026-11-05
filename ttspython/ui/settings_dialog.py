@@ -621,9 +621,10 @@ class SettingsDialog(QDialog):
         self.performance.setChecked(v["performance_mode"])
         self._fill_voices()
         idx = self.voice.findData(v["tts_voice_id"])
-        if idx < 0:  # not saved yet, or no longer installed: show the voice in use
+        if idx < 0:  # not saved yet, not listed yet or no longer installed: show the voice in use
             idx = self.voice.findData(self.ctx.current_voice_id())
         self.voice.setCurrentIndex(max(0, idx))
+        self._voice_shown = self.voice.currentData()
         for slider in (self.rate, self.volume):
             slider.blockSignals(True)
         self.rate.setValue(settings_mod.speed_percent(v["tts_rate"]))
@@ -670,6 +671,12 @@ class SettingsDialog(QDialog):
             self.voice.addItem(voice_label(voice.name), voice.id)
             self.voice.setItemData(self.voice.count() - 1, voice.name, Qt.ToolTipRole)
 
+    def _voice_picked(self):
+        """The voice chosen on this page, or None. What the list shows by itself is no choice:
+        the saved voice may not be listed, for instance when the voices are still loading."""
+        current = self.voice.currentData()
+        return current if current and current != self._voice_shown else None
+
     def _sync_dependents(self, *_):
         """Grey out what a switch above it has turned off (the values are kept)."""
         self.clip_action.setEnabled(self.clip_monitor.isChecked())
@@ -697,7 +704,7 @@ class SettingsDialog(QDialog):
         """Every setting shown in this dialog, as currently entered."""
         v = {"theme_preset": self.values["theme_preset"]}
         v["performance_mode"] = self.performance.isChecked()
-        v["tts_voice_id"] = self.voice.currentData() or self.values["tts_voice_id"]
+        v["tts_voice_id"] = self._voice_picked() or self.saved_values["tts_voice_id"]
         v["tts_output_device"] = self.output.currentData() if self._devices_ready else self.values["tts_output_device"]
         v["sentence_highlight"] = self.highlight.isChecked()
         v["stt_input_device"] = self.input.currentData() if self._devices_ready else self.values["stt_input_device"]
@@ -836,6 +843,7 @@ class SettingsDialog(QDialog):
             self.nav.setCurrentRow(self._page_index["shortcuts"])
             return False
         values = self._read_fields()
+        self._voice_shown = self.voice.currentData()
         # Speed and volume were applied (and saved) as they moved: keep them from now on.
         for key in ("tts_rate", "tts_volume"):
             values.pop(key, None)
@@ -915,11 +923,17 @@ class SettingsDialog(QDialog):
             card.update()
 
     def refresh_voices(self):
-        current = self.voice.currentData()
+        picked = self._voice_picked()
         self.voice.blockSignals(True)
         self._fill_voices()
-        self.voice.setCurrentIndex(max(0, self.voice.findData(current)))
+        idx = self.voice.findData(picked or self.saved_values["tts_voice_id"])
+        if idx < 0:
+            picked = None
+            idx = self.voice.findData(self.ctx.current_voice_id())
+        self.voice.setCurrentIndex(max(0, idx))
         self.voice.blockSignals(False)
+        if not picked:
+            self._voice_shown = self.voice.currentData()
 
     def select_voice(self, voice_id):
         """The voice was switched elsewhere (the voice browser): show it, and keep it on Save."""
@@ -928,6 +942,7 @@ class SettingsDialog(QDialog):
         if self.voice.findData(voice_id) < 0:
             self.voice.addItem(voice_id, voice_id)  # listed properly once the voices refresh
         self.voice.setCurrentIndex(self.voice.findData(voice_id))
+        self._voice_shown = voice_id
 
     def reject(self):
         """Esc or the title bar: ask before dropping changes made on these pages."""

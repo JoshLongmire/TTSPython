@@ -1,5 +1,14 @@
 # Changelog - TTSPython
 
+## Unreleased
+- Dictating into a slow app no longer risks pasting your old clipboard: it now comes back 1.5 seconds after the
+  paste instead of 0.4. If Windows blocks the paste, you are told right away.
+- Settings no longer asks about unsaved changes you did not make, or shows the wrong voice, when it opens before
+  your saved voice is listed.
+- A first-time model download can be cancelled: Listen shows a Cancel button while it runs (the download stopped
+  within 1 second in a real test).
+- `Ctrl` + the numpad's Enter now does what `Ctrl+Enter` does, and the same goes for the other Enter shortcuts.
+
 ## Version 5.0.0 - 2026-11-04
 - Measured against 4.1.0 on the same Windows PC (median of 10 runs):
   startup to first window 1012 ms -> 727 ms; idle memory 65 MB -> 144 MB (RSS), mostly the Qt interface and

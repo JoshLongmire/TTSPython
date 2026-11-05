@@ -4,7 +4,7 @@ from __future__ import annotations
 from PySide6.QtCore import QRect, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFontMetrics, QPainter
 from PySide6.QtWidgets import (
-    QAbstractItemView, QFrame, QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QProgressBar,
+    QAbstractItemView, QFrame, QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QProgressBar, QPushButton,
     QSizePolicy, QStyle, QStyledItemDelegate, QToolButton, QVBoxLayout, QWidget,
 )
 
@@ -388,6 +388,10 @@ class ListenPanel(QFrame):
         col.addWidget(self.title)
         col.addWidget(self.status)
         lay.addLayout(col, 1)
+        self.cancel = QPushButton("Cancel")
+        self.cancel.setToolTip("Stop the download and throw this recording away. It starts again the next time you dictate.")
+        self.cancel.hide()  # only while a model is downloading
+        lay.addWidget(self.cancel)
         self.wave = Waveform(bars=32)
         self.wave.color_role = "danger"
         self.wave.setFixedSize(150, 32)
