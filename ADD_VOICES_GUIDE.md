@@ -11,8 +11,8 @@ Pick the voice in **Settings > Speech > Voice**, or in the mini bar's popover (c
 
 ## Natural voices (Piper)
 
-1. Open **Settings > Speech** and press **Get more voices**. Pick a language, and type in the filter box to narrow the list by name, country or quality.
-2. Choose a **language**. Each voice is listed with its country, quality (smallest, small, medium or best) and download size.
+1. Open **Settings > Speech** and press **Get more voices**.
+2. Choose a **language**, and type in the filter box to narrow the list by name, country or quality. Each voice is listed with its country, quality (smallest, small, medium or best) and download size.
 3. Not sure which one? **Hear samples online** opens the official sample page, where you can listen to each voice.
 4. Select a voice and press **Download** (or double-click it). Most voices are about 60 MB; the "best" ones about
    115 MB. The first voice also downloads the Piper program (about 23 MB).
@@ -23,7 +23,7 @@ Good English voices to start with: **Lessac** (United States, medium), **Amy** (
 
 Things to know:
 - There are 178 voices in 53 languages. Each one is downloaded once; after that it works without internet.
-- Downloads are checked against their published checksums. A broken or cancelled download leaves nothing behind.
+- Downloads are checked against their published checksums. A broken or cancelled download leaves nothing behind. Closing the window (or `Esc`) cancels a running download.
 - Speed works the same as with system voices (50% to 200%), and changes while it speaks.
 - To remove a voice, select it in **Get more voices** and press **Remove** (switch to another voice first).
 - Voices and the Piper program are stored in `%LOCALAPPDATA%\TTSPython` (Windows) or `~/.local/share/ttspython` (Linux).

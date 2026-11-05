@@ -1,6 +1,7 @@
 """Render the real app's windows to PNG files (uses temporary settings and data folders).
 
-Usage: python tools/screenshots.py --out <folder> [--themes all|studio,light] [--scale 1]
+Usage: python tools/screenshots.py --out <folder> [--themes all|studio,light] [--size 1280x800] [--extras]
+Set QT_SCALE_FACTOR=2 for double-size pictures.
 Set TTSPYTHON_DATA (Piper voices, live preview model) and HF_HOME (Whisper models) to folders with
 downloads in them to show those; by default both are empty temporary folders, never your own.
 With QT_QPA_PLATFORM=offscreen and QT_QPA_FONTDIR=C:/Windows/Fonts no window opens on the desktop.
@@ -41,6 +42,7 @@ def main():
 
     from ttspython.core.settings import SettingsStore
     from ttspython.core.theme import THEME_PRESETS
+    from ttspython.ui import icons
     from ttspython.ui.app_controller import AppController
 
     app = QApplication(sys.argv[:1])
@@ -78,11 +80,25 @@ def main():
         ctl.editor.begin_tracking()
         ctl.editor.highlight_range(HL_START, HL_END)
         ctl.window.transport.set_progress(1, 4, "Sentence 2 of 4")
+        # As it looks while reading: nothing is spoken, the waveform gets a speech-shaped level.
+        clock = __import__("time").monotonic
+        math = __import__("math")
+        ctl.window.transport.set_level_source(
+            lambda: 0.2 + 0.7 * abs(math.sin(clock() * 11)) * abs(math.sin(clock() * 2.7)))
+        icons.apply(ctl.actions["play_pause"], "pause", "on_accent", 22)
+        ctl.window.status_label.setText("Speaking...")
+        ctl.actions["stop"].setEnabled(True)
+        settle(1000)
         for key in themes:
             ctl.theme.apply(key)
+            icons.apply(ctl.actions["play_pause"], "pause", "on_accent", 22)
             ctl.editor.begin_tracking()
             ctl.editor.highlight_range(HL_START, HL_END)
             grab(ctl.window, f"main_{key}")
+        ctl.window.transport.set_level_source(None)
+        icons.apply(ctl.actions["play_pause"], "play", "on_accent", 22)
+        ctl.window.status_label.setText("")
+        ctl.actions["stop"].setEnabled(False)
         if args.extras:
             ctl.theme.apply(themes[0])
             ctl.set_mode("stt")

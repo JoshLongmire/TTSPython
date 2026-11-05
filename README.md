@@ -1,6 +1,6 @@
 # TTSPython
 
-An offline text-to-speech (TTS) and speech-to-text (STT) desktop app for Windows and Linux, with a full editor window and a floating mini bar that works over any app. Speech uses your system voices (SAPI5 on Windows, espeak-ng on Linux) or natural-sounding Piper voices you download once, and dictation runs locally with `faster-whisper`. Nothing you read or say leaves your computer.
+A free, open-source, offline text-to-speech (TTS) and speech-to-text (STT) desktop app for Windows and Linux, with a full editor window and a floating mini bar that works over any app. Speech uses your system voices (SAPI5 on Windows, espeak-ng on Linux) or natural-sounding Piper voices you download once, and dictation runs locally with `faster-whisper`. Nothing you read or say leaves your computer.
 
 ![TTSPython main window](assets/screenshots/main.png)
 
@@ -12,7 +12,7 @@ An offline text-to-speech (TTS) and speech-to-text (STT) desktop app for Windows
 |:---:|:---:|
 | ![The main window in Listen mode](assets/screenshots/listen.png) | ![The Listen page of Settings](assets/screenshots/settings.png) |
 
-![Python](https://img.shields.io/badge/python-3.9%2B-blue.svg)
+![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-lightgrey.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 ![Version](https://img.shields.io/badge/version-5.0.0-brightgreen.svg)
@@ -67,7 +67,7 @@ Work even when TTSPython is in the background. All can be changed in **Settings 
 - Save the text (or just the selected part) as **WAV** or **MP3** with the current voice, speed and volume. Export runs in the background with progress and a Cancel button, writes as it goes (a whole book never sits in memory), remembers the folder and format, and offers **Open folder** when done.
 
 ### Editor
-- **New**, open and save text files (UTF-8, UTF-16 and Windows-1252) without changing their encoding or line endings. A file in another encoding (such as GBK or Shift-JIS) can look wrong; you are told when it opens, and Save asks where to save, so the original stays as it is. The **Open** button's arrow lists recent files, and you can drop a text file on the editor to open it. The window title shows the file name and whether it has unsaved changes. Closing with unsaved text asks first.
+- **New**, open and save text files (UTF-8, UTF-16 and Windows-1252) without changing their encoding or line endings. A file in another encoding (such as GBK or Shift-JIS) can look wrong; you are told when it opens, and Save asks where to save, so the original stays as it is. The **Open** button's arrow lists recent files, and you can drop a text file on the editor to open it. The window title shows the file name and whether it has unsaved changes. Closing with unsaved text offers **Save**, **Discard** or **Cancel**.
 - Unsaved text is kept every 30 seconds, so it comes back after a crash or a logoff.
 - The word count also shows the reading time at the current speed.
 - Inline **Find and replace** (`Ctrl+F`) with match case, regular expressions, previous/next with wrap-around, a match count ("2 of 5"), Replace and Replace all (one undo step).
@@ -79,8 +79,8 @@ Work even when TTSPython is in the background. All can be changed in **Settings 
 - The window, Settings and mini bar fit small windows and large display scaling without cutting anything off.
 
 ## Requirements
-- **Windows 10/11** or **Linux** (X11 or Wayland).
-- Python 3.9 or newer (developed and tested on Python 3.13).
+- **Windows 10/11** or **Linux** (X11 or Wayland). Linux is a preview in 5.0: it is built and smoke-tested automatically, but has had less hands-on testing than Windows, so please report what you find.
+- To run from source: Python 3.10 or newer (developed on 3.13; the full test suite also passes on 3.10).
 - Python packages (installed by the scripts below): `PySide6-Essentials`, `pyttsx3`, `numpy`, `sounddevice`, `lameenc`, `faster-whisper`, `sherpa-onnx` (the instant live preview); on Windows also `comtypes` (talks to the SAPI5 voices; pyttsx3 brings `pywin32` for its fallback driver); on Linux also `pynput`.
 - Linux system packages: `espeak-ng`, `portaudio`, `xcb-util-cursor` (Debian/Ubuntu: `libxcb-cursor0`). Optional: `wtype` to type dictation at the cursor on Wayland.
 
@@ -90,6 +90,7 @@ Work even when TTSPython is in the background. All can be changed in **Settings 
 Download the latest build from [Releases](https://github.com/JoshLongmire/TTSPython/releases):
 - **Windows:** `TTSPython-<version>-windows-x64.zip`. Extract it anywhere and run `TTSPython\TTSPython.exe`.
   The app is not code-signed, so SmartScreen may warn you: choose **More info > Run anyway**.
+  The folder also holds `LICENSE.txt` and `THIRD_PARTY_LICENSES.txt`.
 - **Linux:** `TTSPython-<version>-linux-x86_64.tar.gz`. Extract it and run `TTSPython/install.sh` (installs for your
   user only: app menu entry and a `ttspython` command; `uninstall.sh` removes it). It also needs
   `espeak-ng`, `libportaudio2` and `libxcb-cursor0` from your distribution; the installer tells you if one is missing.
@@ -98,7 +99,7 @@ Download the latest build from [Releases](https://github.com/JoshLongmire/TTSPyt
 The first dictation downloads the Whisper model you picked (once) and the live preview model (73 MB, once, English only), and a Piper voice downloads when you pick it, so the app needs internet for those.
 
 ### From source: Windows
-1. Install Python 3.9 or newer from [python.org](https://www.python.org/downloads/windows/) (tick **Add Python to PATH**).
+1. Install Python 3.10 or newer from [python.org](https://www.python.org/downloads/windows/) (tick **Add Python to PATH**).
 2. Get the code and install the dependencies:
    ```powershell
    git clone https://github.com/JoshLongmire/TTSPython.git
@@ -106,8 +107,6 @@ The first dictation downloads the Whisper model you picked (once) and the live p
    ./dependencies.bat
    py TTSPython.py
    ```
-
-> **First run tip:** If Windows Defender or SmartScreen warns you, choose **More info > Run anyway**. TTSPython is a plain Python script, not a signed installer.
 
 ### From source: Linux (Arch and others)
 1. System packages (Arch example):
@@ -242,7 +241,7 @@ The Settings window has these pages: **Appearance** (theme gallery, Performance 
 - The microphone is muted, or Windows does not let apps use it: **Settings > Privacy & security > Microphone**, turn on access for desktop apps.
 
 ### Dictation is not typed into another app
-- Some apps running as administrator block simulated typing; the text is put on the clipboard instead, so press `Ctrl+V`.
+- A window running as administrator ignores simulated typing. TTSPython notices, leaves the text on the clipboard and says so: press `Ctrl+V`. The same happens if a paste fails.
 - Terminals often paste with `Shift+Insert`: change **Settings > Listen > Paste using** (also used with `wtype` on Wayland).
 - If you still hold `Alt` or `Shift` from the stop hotkey, the text is copied instead of pasted (pasting then would trigger another command): press `Ctrl+V`.
 - On Wayland, install `wtype`, or use the clipboard option.
@@ -279,7 +278,7 @@ build.bat        # Windows: dist/TTSPython/TTSPython.exe and dist/TTSPython-<ver
 ```
 Each system builds its own app (PyInstaller cannot build for another OS). Build Linux on the oldest distribution
 you want to support. Pushing a `v*` tag runs `.github/workflows/build.yml`, which builds and smoke-tests both
-and attaches them to the GitHub release. To check a build, run it with `TTSPYTHON_SELFTEST=<report.json>`: it loads
+and attaches them to the GitHub release, using the exact tested versions in `packaging/constraints.txt`. To check a build, run it with `TTSPYTHON_SELFTEST=<report.json>`: it loads
 every part (voices, the Piper voice list, MP3 export, Whisper libraries, the live preview engine and, if downloaded,
 its model, audio devices), writes the report (with a `problems` list, empty when all is well) and quits,
 without sound. `python packaging/build.py --check` does this right after building and fails if it finds a problem. Add `TTSPYTHON_SELFTEST_STT=tiny` to also dictate a spoken test phrase through the real transcription
@@ -289,7 +288,8 @@ and `TTSPYTHON_SELFTEST_VOICE=<voice id>` exports the test MP3 with that voice (
 
 ## License
 
-Released under the MIT License. See the [`LICENSE`](LICENSE) file.
+Released under the MIT License. See the [`LICENSE`](LICENSE) file. The ready-to-run app also includes Qt, Whisper's
+engine and other components under their own licenses, listed in its `THIRD_PARTY_LICENSES.txt`.
 
 Piper voices are spoken by the official [Piper](https://github.com/rhasspy/piper) program (MIT, with espeak-ng under
 GPL-3.0), which TTSPython downloads and runs as a separate program; it is not part of TTSPython. Each voice has its

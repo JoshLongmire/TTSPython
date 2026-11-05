@@ -28,14 +28,14 @@
 - Switch to **Listen** (`Ctrl+M`). A dictation panel appears under the editor with a record button, a live input waveform and the current model and microphone.
 - Press record, speak, press again. The transcript is cleaned up (capital first letter, final punctuation) and added to the editor.
 - When dictating into another app (the mini bar's mic or `Ctrl+Alt+D`), a **caption bubble** above the bar shows each word about half a second after you say it. A small, fast **instant preview** recognizer shows the words first (a little dimmer); Whisper checks them whenever you pause, or every couple of seconds while you keep talking, and corrects them in place. The newest word is highlighted. The bubble is only as big as the text (up to three lines, larger than the app's text) and grows upward, so the newest words stay right above the bar. **X** or `Esc` cancels the dictation; nothing is typed.
-- Because Whisper checks at each pause, the text is usually ready when you stop: typed almost at once if you paused first, otherwise within about a second and a half. Long dictations settle at real pauses in the audio as you go (never in the middle of a word), so the wait stays short however long you talk.
+- Because Whisper checks at each pause, the text is usually ready when you stop: typed almost at once if you paused first, otherwise in about 0.5 to 1.2 seconds. Long dictations settle at real pauses in the audio as you go (never in the middle of a word), so the wait stays short however long you talk.
 - The instant preview needs a 73 MB model, downloaded once in the background the first time you dictate (its progress shows in the status bar only; a pop-up appears only if it fails). It works for English; with another language the captions come from Whisper alone. While loaded it uses about 140 MB of memory, freed together with the Whisper model when that unloads. Turn it off in **Settings > Listen > Instant live preview**, and delete its model in the downloaded models list.
 - Dictation keeps full speed while TTSPython is in the background: Windows 11 runs background apps in efficiency mode, which made each Whisper pass 2.6 times slower, so TTSPython opts out.
 - If the microphone delivers only silence (muted, or blocked in Windows privacy settings), you are told so.
 - **Settings > Listen**:
   - Microphone, with a live level meter so you can check it hears you, and **Refresh** for one plugged in later.
   - **Whisper model**: Tiny, Base, Small (default), Medium, Large v3, Large v3 Turbo, Distil Large v3. A model downloads the first time it is used; the download progress shows in the status bar, the Listen panel and next to the mini bar.
-  - **Downloaded models** with their size and a **Delete** button.
+  - **Downloaded models** with their size and a **Delete** button (it asks first).
   - **Language**: English (default), Auto-detect, or one of 15 common languages.
   - **Unload the model after each dictation** or **Unload when idle** after 1 to 60 minutes.
   - How dictation reaches other apps (type at the cursor, or copy to the clipboard only) and the paste keys to use (Ctrl+V, or Shift+Insert for terminals).
@@ -43,7 +43,7 @@
 ## Mini mode
 
 - A compact bar that floats above every window. It **never takes keyboard focus**, so the app you were typing in keeps its cursor.
-- **Mic**: dictate into whatever app you are using. The text is typed at the cursor. Your clipboard is restored afterwards, and the dictated text is kept out of Windows clipboard history.
+- **Mic**: dictate into whatever app you are using. The text is typed at the cursor. Your clipboard is restored afterwards, and the dictated text is kept out of Windows clipboard history. If the paste fails, or the window runs as administrator (which ignores simulated typing), the text stays on the clipboard and you are told.
 - **Play**: reads the text you have highlighted in the app you are using, or the clipboard when nothing is highlighted. Press again to stop.
 - **Waveform**: shows your voice while dictating and the speech while reading.
 - **Chevron or right-click**: a popover for voice, speed and volume, **Pause/Resume**, and Hide mini mode.
@@ -69,9 +69,9 @@ Change them in **Settings > Shortcuts**. If another program already owns a combi
 
 - **Add text** (the editor contents), **Add files** (several at once) and clipboard items (from the clipboard monitor).
 - **Play queue** starts at the selected item (or the top). Double-click an item or press `Enter` to play from it. Items are separated by a half-second pause.
-- **Right-click** an item: Play from here, Move to top, Copy to the editor, Remove.
+- **Right-click** an item: Play from here, Move to top, Copy to the editor (as a new untitled document, so Save cannot overwrite the file you had open), Remove.
 - **Drop text files** on the queue to add them, even when it is empty.
-- **Drag** items to reorder, or use the up and down arrows. The minus button (or Delete) removes an item; **Clear queue** removes them all.
+- **Drag** items to reorder, or use the up and down arrows. The minus button (or Delete) removes an item; **Clear queue** removes them all (it asks first).
 - **Loop** repeats the whole queue.
 - Each row shows the item type, word count and listening time; the playing item is marked with an accent bar.
 - The queue is kept when you quit and comes back the next time.
@@ -99,8 +99,8 @@ In the status bar (or Settings > Clipboard):
 
 ## Files
 
-- **Open** reads UTF-8 (with or without BOM), UTF-16 and Windows-1252 text and remembers the file's encoding and line endings; **Save** writes them back the same way, so an unchanged file stays byte-for-byte identical.
-- **New** (`Ctrl+N`) starts an empty document. Drop a text file on the editor to open it. The Open button's arrow lists the last 8 files.
+- **Open** reads UTF-8 (with or without BOM), UTF-16 and Windows-1252 text and remembers the file's encoding and line endings; **Save** writes them back the same way, so an unchanged file stays byte-for-byte identical. A file in an encoding TTSPython cannot read (such as GBK or Shift-JIS) can look wrong: you are told when it opens, and Save asks where to save, so the original stays as it is.
+- **New** (`Ctrl+N`) starts an empty document. Drop a text file on the editor to open it (to read several, drop them on the queue). The Open button's arrow lists the last 8 files. Opening a file while the old one is being read stops the reading; the queue and clipboard keep playing.
 - Opening a file, New, closing the window or quitting asks first if there are unsaved changes: **Save**, **Discard** or **Cancel** (Enter saves). Quitting also asks if an export or a dictation is still running.
 - Unsaved text is kept every 30 seconds (and when Windows logs off or shuts down) and put back the next time TTSPython starts, even after a crash.
 

@@ -33,5 +33,5 @@ exit /b 0
 
 :no_python
 echo [ERROR] Python launcher (py) not found in PATH.
-echo Install Python 3.9 or newer and run this script again.
+echo Install Python 3.10 or newer and run this script again.
 exit /b 1

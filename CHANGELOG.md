@@ -2,7 +2,7 @@
 
 ## Version 5.0.0 - 2026-11-04
 - Measured against 4.1.0 on the same Windows PC (median of 10 runs):
-  startup to first window 1012 ms -> 976 ms; idle memory 65 MB -> 130 MB (RSS), mostly the Qt interface and
+  startup to first window 1012 ms -> 727 ms; idle memory 65 MB -> 144 MB (RSS), mostly the Qt interface and
   keeping the voice loaded for instant speech; Python packages about 197 MB larger (Qt replaces Pillow).
   Tests: 442 pass (plus 5 on real audio and the desktop); 21 bug specs fail on 4.1.0 and pass on 5.0.0.
 - New interface built with Qt (PySide6), replacing tkinter. Every v4 control and setting is kept.
@@ -51,7 +51,7 @@
   Ctrl+Alt+Shift+M mini mode (other apps often take Ctrl+Alt+M). Keys another app already uses are shown in
   Settings and the status bar; a pop-up says so once, the first time, not on every start, and TTSPython tries
   again a few seconds after starting in case a key was only busy for a moment.
-- New **ready-to-run downloads**, no Python needed: `TTSPython.exe` for Windows (94 MB zip, 248 MB unpacked)
+- New **ready-to-run downloads**, no Python needed: `TTSPython.exe` for Windows (94 MB zip, 249 MB unpacked)
   and a Linux build with a per-user installer (menu entry, `ttspython` command). Build them yourself with
   `build.bat` / `build.sh`; each release on GitHub gets both, built and smoke-tested automatically.
 - New **system tray** icon, with an option to keep running in the tray when the window is closed.
@@ -150,7 +150,7 @@
   rebuilds -> 1; Cancel or Reset in Settings no longer restyles every window when the theme did not change (50 ms -> 0.1 ms).
 - Microphones that only record at a higher rate (such as 48 kHz): sound above what dictation can use no longer folds
   back as noise (a 10 kHz test tone -1.4 dB -> -55 dB; speech frequencies unchanged, 0.1 ms per block).
-- Python 3.8 is no longer supported (Qt needs 3.9 or newer).
+- Python 3.10 or newer is now needed (the full test suite passes on 3.10 and 3.13).
 - Voice, speed, volume, queue loop and panel layout are remembered between sessions.
 - Settings moved to `%APPDATA%\TTSPython\settings.json` (Linux: `~/.config/ttspython/settings.json`); your
   v4 `tts_settings.json` is imported on first start and left untouched.
@@ -455,8 +455,8 @@
 - **Themes**: 12 presets (Studio, Dark, Twilight, Light, High Contrast, Forest, New Vegas, Spiral, Poly, Sunset, Paper, Graphite)
 - **Modes**: Speak (SAPI5 on Windows, espeak-ng on Linux) + Listen (offline faster-whisper, 16 languages plus Auto-detect)
 - **Queue sources**: Text, File, Clipboard
-- **Platforms**: Windows 10/11 and Linux
-- **Python**: 3.9 or newer
+- **Platforms**: Windows 10/11 and Linux (a preview in 5.0)
+- **Python**: 3.10 or newer
 
 ---
 
