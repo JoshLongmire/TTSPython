@@ -44,7 +44,7 @@
 | Show or hide mini mode | `Ctrl+Alt+Shift+M` |
 | Cancel the dictation (only while dictating into another app) | `Esc` |
 
-All shortcuts can be changed in **Settings > Shortcuts**.
+All of these except `Esc` can be changed in **Settings > Shortcuts**.
 
 ## Common workflows
 

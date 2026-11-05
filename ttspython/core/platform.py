@@ -48,13 +48,26 @@ def data_dir() -> str:
     return os.path.join(base, "ttspython")
 
 
+def child_env() -> dict:
+    """The environment for other programs. A packaged Linux build points the library path at its
+    own libraries, which would break system programs started from it."""
+    env = dict(os.environ)
+    if getattr(sys, "frozen", False):
+        original = env.pop("LD_LIBRARY_PATH_ORIG", None)
+        if original is not None:
+            env["LD_LIBRARY_PATH"] = original
+        else:
+            env.pop("LD_LIBRARY_PATH", None)
+    return env
+
+
 def open_uri(uri_or_path: str) -> None:
     """Open a settings URI, URL or file with the platform default handler."""
     if IS_WINDOWS:
         os.startfile(uri_or_path)  # type: ignore[attr-defined]
         return
     opener = "open" if IS_DARWIN else "xdg-open"
-    subprocess.Popen([opener, uri_or_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    subprocess.Popen([opener, uri_or_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=child_env())
 
 
 def run_first_available(commands) -> bool:
@@ -63,7 +76,7 @@ def run_first_available(commands) -> bool:
         if shutil.which(cmd[0]) is None:
             continue
         try:
-            subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=child_env())
             return True
         except OSError:
             continue

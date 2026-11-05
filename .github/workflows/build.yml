@@ -21,7 +21,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.13"
       - name: Linux libraries
         if: runner.os == 'Linux'
         run: |
@@ -32,7 +32,7 @@ jobs:
         shell: bash
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r requirements.txt "pyinstaller>=6.10"
+          python -m pip install -r requirements.txt "pyinstaller>=6.10" -c packaging/constraints.txt
           python packaging/build.py
       - name: Smoke test
         shell: bash

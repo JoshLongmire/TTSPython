@@ -22,7 +22,7 @@ An offline text-to-speech (TTS) and speech-to-text (STT) desktop app for Windows
 ### Speak (text-to-speech)
 - **Play / Pause / Stop** with a media-player style control bar, plus **Speak selected** and **Speak from here** (from the sentence where the cursor is; also in the editor's right-click menu).
 - The sentence being read is **highlighted** and the editor follows along.
-- **Speed** (50% to 200%, 100% is normal) and **volume** change **while it speaks**: drag the speed slider and you hear every step as you drag (within 10 ms), mid-sentence, with the same pitch. Changing the **voice** mid-sentence continues from the word being read.
+- **Speed** (50% to 200%, 100% is normal) and **volume** change **while it speaks**: drag the speed slider and you hear every step as you drag (within 16 ms), mid-sentence, with the same pitch. Changing the **voice** mid-sentence continues from the word being read.
 - **More voices:** besides the system voices (including the Windows 11 voices Windows hides from older apps, such as Mark), **Settings > Speech > Get more voices** downloads natural-sounding **Piper** voices: dozens in English and many other languages, about 60 MB each, downloaded once and then fully offline.
 - Choose the **output device** in Settings (speakers, headset, virtual cable); every device from every audio system is listed, and **Refresh** finds one you plugged in later.
 - Speech starts within a fraction of a second, even for very long texts, because it is prepared a few seconds ahead of what you hear.
@@ -30,7 +30,7 @@ An offline text-to-speech (TTS) and speech-to-text (STT) desktop app for Windows
 ### Listen (speech-to-text)
 - Offline dictation with `faster-whisper` (CPU, int8). Press the record button, speak, press again.
 - **Live captions:** when you dictate into another app, a bubble above the mini bar shows each word about half a second after you say it, so you can spot a mistake early. A fast **instant preview** recognizer shows the words first (slightly dimmer); Whisper then checks them and corrects them in place, and the newest word is highlighted. The bubble grows a line at a time (up to three), with the newest words right above the bar. Its **X** (or `Esc`) cancels the dictation and nothing is typed.
-- **Typed right after you stop:** Whisper checks the text whenever you pause, so if you pause before stopping, the text is typed almost at once (under 0.2 s in tests); otherwise about half a second to a second and a half later. Long dictations settle at real pauses as you go, so this stays short however long you talk.
+- **Typed right after you stop:** Whisper checks the text whenever you pause, so if you pause before stopping, the text is typed almost at once (usually under 0.1 s in tests, 0.6 s at most); otherwise in about 0.5 to 1.2 s. Long dictations settle at real pauses as you go, so this stays short however long you talk.
 - Dictation keeps full speed while TTSPython is in the background (Windows 11 would otherwise slow it down 2.6 times while you work in another app).
 - Pick the **Whisper model** (from Tiny to Large v3 Turbo) and the **language**: English by default, Auto-detect, or Spanish, French, German, Italian, Portuguese, Dutch, Polish, Russian, Ukrainian, Turkish, Arabic, Hindi, Japanese, Korean or Chinese.
 - The model loads while you are still talking and can unload itself after a set idle time to free memory.
@@ -50,7 +50,7 @@ Work even when TTSPython is in the background. All can be changed in **Settings 
 | Start or stop dictation | `Ctrl+Alt+D` |
 | Speak highlighted text or clipboard (press again to stop) | `Ctrl+Alt+S` |
 | Stop speaking | `Ctrl+Alt+X` |
-| Show or hide mini mode | `Ctrl+Alt+Shift+M` (`Ctrl+Alt+M` in earlier 5.0 builds; other apps often use it) |
+| Show or hide mini mode | `Ctrl+Alt+Shift+M` |
 | Pause or resume speech, Show main window | unassigned |
 
 ### Speech queue
@@ -67,7 +67,7 @@ Work even when TTSPython is in the background. All can be changed in **Settings 
 - Save the text (or just the selected part) as **WAV** or **MP3** with the current voice, speed and volume. Export runs in the background with progress and a Cancel button, writes as it goes (a whole book never sits in memory), remembers the folder and format, and offers **Open folder** when done.
 
 ### Editor
-- **New**, open and save text files (UTF-8, UTF-16 and Windows-1252) without changing their encoding or line endings. The **Open** button's arrow lists recent files, and you can drop a text file on the editor to open it. The window title shows the file name and whether it has unsaved changes. Closing with unsaved text asks first.
+- **New**, open and save text files (UTF-8, UTF-16 and Windows-1252) without changing their encoding or line endings. A file in another encoding (such as GBK or Shift-JIS) can look wrong; you are told when it opens, and Save asks where to save, so the original stays as it is. The **Open** button's arrow lists recent files, and you can drop a text file on the editor to open it. The window title shows the file name and whether it has unsaved changes. Closing with unsaved text asks first.
 - Unsaved text is kept every 30 seconds, so it comes back after a crash or a logoff.
 - The word count also shows the reading time at the current speed.
 - Inline **Find and replace** (`Ctrl+F`) with match case, regular expressions, previous/next with wrap-around, a match count ("2 of 5"), Replace and Replace all (one undo step).

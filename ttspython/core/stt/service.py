@@ -387,6 +387,7 @@ class SttService:
         self.input_device = None
         self.live = True  # send partial captions while recording
         self._session = 0  # bumped by start/stop/cancel: a pass from an old session never reports
+        self._recording = 0  # the session that start() opened: stop keeps it, a new start replaces it
         self._cancelled = False
         self._settled_text = ""
         self._settled_samples = 0
@@ -442,25 +443,29 @@ class SttService:
             if self._state is not SttState.IDLE:
                 return False
             self._cancel_timer()
+            failure = None
             try:
                 self.recorder.start(self.input_device)
             except Exception as exc:
-                self.events.emit("error", f"Could not start recording: {friendly_audio_error(exc)}")
+                failure = f"Could not start recording: {friendly_audio_error(exc)}"
                 self._schedule_unload()  # the timer was cancelled above
-                return False
-            self._target = target
-            self._load_failed = None
-            self._cancelled = False
-            self._settled_text = ""
-            self._settled_samples = 0
-            self._last_pass = None
-            self._checked = ("", 0.0)
-            self._preview_words = []
-            self._pass_now.clear()
-            self._session += 1
-            session = self._session
-            self._set_state(SttState.RECORDING)
-            self._start_preview(session)
+            else:
+                self._target = target
+                self._load_failed = None
+                self._cancelled = False
+                self._settled_text = ""
+                self._settled_samples = 0
+                self._last_pass = None
+                self._checked = ("", 0.0)
+                self._preview_words = []
+                self._pass_now.clear()
+                self._session += 1
+                session = self._recording = self._session
+                self._set_state(SttState.RECORDING)
+                self._start_preview(session)
+        if failure:  # after the lock: the message box runs its own event loop, where a hotkey can call start again
+            self.events.emit("error", failure)
+            return False
         if self.cache.loaded_name != self.model:
             self._pool.submit(self._preload)
         if self.live and hasattr(self.recorder, "snapshot"):
@@ -712,7 +717,9 @@ class SttService:
                 log.exception("A live caption pass failed; captions stop until the next dictation")
                 return
             # Kept even if dictation stopped meanwhile: stop can use it instead of a new pass.
-            self._last_pass = (base, base + audio.size, " ".join(t for _s, _e, t in segments if t))
+            # Not if a newer dictation began: this text is not part of that one.
+            if self._recording == session:
+                self._last_pass = (base, base + audio.size, " ".join(t for _s, _e, t in segments if t))
             if self._session != session:
                 return
             with self._caption_lock:

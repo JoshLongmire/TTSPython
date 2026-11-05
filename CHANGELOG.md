@@ -1,10 +1,10 @@
 # Changelog - TTSPython
 
-## Version 5.0.0 - 2026-11-03
+## Version 5.0.0 - 2026-11-04
 - Measured against 4.1.0 on the same Windows PC (median of 10 runs):
   startup to first window 1012 ms -> 976 ms; idle memory 65 MB -> 130 MB (RSS), mostly the Qt interface and
   keeping the voice loaded for instant speech; Python packages about 197 MB larger (Qt replaces Pillow).
-  Tests: 387 pass (plus 5 on real audio and the desktop); 21 bug specs fail on 4.1.0 and pass on 5.0.0.
+  Tests: 442 pass (plus 5 on real audio and the desktop); 21 bug specs fail on 4.1.0 and pass on 5.0.0.
 - New interface built with Qt (PySide6), replacing tkinter. Every v4 control and setting is kept.
   Word-by-word highlighting (which v4 only did on Python 3.12 and older) is replaced by sentence highlighting
   that works everywhere.
@@ -38,7 +38,7 @@
     typed. The preview uses about 140 MB of memory while loaded (freed with the Whisper model). Turn it off in
     Settings > Listen.
   - **The text is typed right after you stop.** Measured on 7 test dictations (4 to 42 s, Whisper small, the same
-    PC), compared with the first 5.0 test build: first caption 2.6-4.4 s -> 0.6-0.9 s after you start talking; captions
+    PC), compared with an early test version of 5.0: first caption 2.6-4.4 s -> 0.6-0.9 s after you start talking; captions
     update every 4.5 s -> every 0.3 s; stop to text 3.0-5.4 s -> 0.01-0.6 s when you pause before stopping
     (under 0.1 s on 6 of the 7), and 3.1-5.6 s -> 0.5-1.2 s when you stop mid-sentence. Word errors: 2 in 664
     words vs 1 before, the same misheard phrase ("in a" for "and a") in both builds.
@@ -63,7 +63,7 @@
   - Speech starts quickly even for long documents: about 50 ms from Play to the first audio handed to the
     sound device, measured on Windows with a SAPI5 voice.
   - **Speed, volume and voice change while speaking.** Every step of a speed drag is heard as you drag (within
-    10 ms), mid-sentence, with the same pitch (before, it waited for the next group of sentences, often the whole text). Speed now goes
+    16 ms), mid-sentence, with the same pitch (before, it waited for the next group of sentences, often the whole text). Speed now goes
     from 50% to 200% (shown in percent; 100% is the old 200 words per minute) in smooth steps instead of the
     engine's few fixed rates. A new voice takes over at the word being read. The Settings sliders apply live too,
     and Cancel puts them back.
@@ -127,6 +127,25 @@
   - If the live preview stops working, you are told once and captions carry on from Whisper alone.
   - Keyboard and screen readers: themes can be picked by keyboard, Enter works in the voice list, settings and sliders
     are named, and the Play button's tooltip says what it will do now.
+- Fixed in the final check before release (55 new tests: 46 failed before these fixes, all pass now):
+  - Saving could permanently damage a file in an encoding TTSPython cannot read (such as GBK or Shift-JIS). Such a file
+    now says so when opened, and Save asks where to save.
+  - Piper voices crashed with no message on a Windows account with a non-English name (such as José or 日本語). They now
+    work; Whisper, the live preview and MP3 export were tested under those names too.
+  - A damaged queue file stopped the app from starting. Settings saved by an editor with a byte order mark were reset.
+  - Copy to the editor kept the open file attached, so Ctrl+S replaced that file with the queue item's text.
+  - The unsaved-changes prompt now offers Save, Discard and Cancel, and Enter saves (it used to discard). Quitting during
+    an export or a dictation asks first. Clear queue and deleting a Whisper model now ask, with No as the default.
+  - A failed paste no longer loses the dictation: it stays on the clipboard. A window running as administrator (which
+    silently ignores pasting) now gets the text on the clipboard, with a message.
+  - Pressing a hotkey while a "no microphone" message was open could freeze the app. A cancelled dictation's late text
+    could be typed into the next one.
+  - Opening a file while the old one is being read stops the reading. Saving keeps no-break spaces. Closing Settings no
+    longer undoes a speed or volume changed in the main window. Esc in Get more voices cancels the download. Saving a
+    hotkey another app holds says so right away. Recovered text stays safe until the next draft is written.
+  - On Linux: saving keeps a file's permissions and links, and system programs are no longer started with the app's own
+    libraries (not yet tried on a real Linux build).
+  - The download now includes the license information of what is in it (`LICENSE.txt`, `THIRD_PARTY_LICENSES.txt`).
 - Faster: a speed slider step on a 5.4 MB document 47.5 ms -> 0.34 ms; loading a saved queue of 200 items 201 list
   rebuilds -> 1; Cancel or Reset in Settings no longer restyles every window when the theme did not change (50 ms -> 0.1 ms).
 - Microphones that only record at a higher rate (such as 48 kHz): sound above what dictation can use no longer folds
@@ -432,7 +451,7 @@
 
 ## Statistics (5.0.0)
 
-- **Shortcuts**: 13 in-window plus 6 global hotkeys, all customizable
+- **Shortcuts**: 16 in-window plus 6 global hotkeys, all customizable
 - **Themes**: 12 presets (Studio, Dark, Twilight, Light, High Contrast, Forest, New Vegas, Spiral, Poly, Sunset, Paper, Graphite)
 - **Modes**: Speak (SAPI5 on Windows, espeak-ng on Linux) + Listen (offline faster-whisper, 16 languages plus Auto-detect)
 - **Queue sources**: Text, File, Clipboard
@@ -446,11 +465,10 @@
 Potential future enhancements:
 - PDF and Word document support
 - Pronunciation dictionary
-- Recent files menu
 
 ---
 
-**Thank you for using TTS Application!** 🎉
+**Thank you for using TTSPython!** 🎉
 
 For questions or suggestions, check the documentation:
 - `README.md` - Overview and setup

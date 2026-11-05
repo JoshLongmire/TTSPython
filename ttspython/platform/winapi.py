@@ -6,6 +6,7 @@ from ctypes import wintypes
 
 user32 = ctypes.WinDLL("user32", use_last_error=True)
 kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+advapi32 = ctypes.WinDLL("advapi32", use_last_error=True)
 shell32 = ctypes.WinDLL("shell32", use_last_error=True)
 
 ULONG_PTR = ctypes.c_size_t
@@ -82,10 +83,37 @@ user32.SetWindowLongPtrW.argtypes = [wintypes.HWND, ctypes.c_int, LONG_PTR]
 user32.SetWindowLongPtrW.restype = LONG_PTR
 kernel32.GetCurrentThreadId.restype = wintypes.DWORD
 kernel32.GetCurrentProcessId.restype = wintypes.DWORD
+kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+kernel32.OpenProcess.restype = wintypes.HANDLE
+kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+advapi32.OpenProcessToken.argtypes = [wintypes.HANDLE, wintypes.DWORD, ctypes.POINTER(wintypes.HANDLE)]
+advapi32.OpenProcessToken.restype = wintypes.BOOL
 
 
 def foreground_window():
     return user32.GetForegroundWindow() or 0
+
+
+def process_needs_admin(pid):
+    """True if we may not look inside that program: it runs with more rights than ours."""
+    PROCESS_QUERY_LIMITED_INFORMATION, TOKEN_QUERY = 0x1000, 0x0008
+    process = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+    if not process:
+        return True
+    try:
+        token = wintypes.HANDLE()
+        if not advapi32.OpenProcessToken(process, TOKEN_QUERY, ctypes.byref(token)):
+            return True
+        kernel32.CloseHandle(token)
+        return False
+    finally:
+        kernel32.CloseHandle(process)
+
+
+def window_needs_admin(hwnd):
+    """Windows silently drops keys sent to a program with more rights, and says nothing about it."""
+    pid = window_process_id(hwnd) if hwnd else 0
+    return bool(pid) and process_needs_admin(pid)
 
 
 def window_process_id(hwnd):

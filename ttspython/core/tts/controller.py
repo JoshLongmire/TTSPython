@@ -132,6 +132,11 @@ class SpeechController:
     def wait_ready(self, timeout=10.0):
         return self._ready.wait(timeout)
 
+    @property
+    def current_source(self):
+        """Where the text being spoken came from; None between jobs."""
+        return self._current_source
+
     def speak(self, text, source=Source.EDITOR, base16=0, replace=False):
         """Speak text. Returns False if busy and replace is False, or text is blank."""
         if not text or not text.strip():

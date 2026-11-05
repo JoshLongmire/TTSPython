@@ -8,6 +8,7 @@ import re
 import shutil
 import sys
 import tempfile
+import time
 from datetime import datetime
 
 from . import keys
@@ -292,22 +293,21 @@ def atomic_replace(src, dst):
         return
     except OSError:
         pass
-    try:
-        os.chmod(dst, 0o666)
-    except OSError:
-        pass
+    if os.name == "nt":  # clears the read-only flag; on Linux it would open a private file to everyone
+        try:
+            os.chmod(dst, 0o666)
+        except OSError:
+            pass
     try:
         os.replace(src, dst)
         return
     except OSError:
         pass
+    shutil.copyfile(src, dst)  # if this fails, src stays: it may be the only whole copy left
     try:
-        shutil.copyfile(src, dst)
-    finally:
-        try:
-            os.remove(src)
-        except OSError:
-            pass
+        os.remove(src)
+    except OSError:
+        pass
 
 
 def write_json_atomic(path, data):
@@ -322,8 +322,20 @@ def write_json_atomic(path, data):
 
 
 def _read_json(path):
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, "r", encoding="utf-8-sig") as f:  # -sig: editors may save it with a byte order mark
         return json.load(f)
+
+
+def _read_settings(path, tries=3, wait=0.2):
+    """A sync tool or antivirus may hold the file for a moment: that does not make it broken."""
+    for attempt in range(tries):
+        try:
+            return _read_json(path)
+        except OSError:
+            if attempt == tries - 1:
+                raise
+            time.sleep(wait)
+    return None
 
 
 KEEP_BROKEN_COPIES = 3
@@ -354,7 +366,7 @@ def load(path=None, legacy=None):
     info = {"path": path, "source": "defaults", "broken_copy": None}
     if os.path.exists(path):
         try:
-            data = normalize(_read_json(path))
+            data = normalize(_read_settings(path))
             info["source"] = "file"
             return data, info
         except Exception as exc:

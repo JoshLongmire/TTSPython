@@ -11,7 +11,7 @@ import subprocess
 from PySide6.QtCore import QMimeData, QObject, QTimer, Signal
 from PySide6.QtGui import QGuiApplication
 
-from ..core.platform import IS_WINDOWS, session_type
+from ..core.platform import IS_WINDOWS, child_env, session_type
 
 MAX_SNAPSHOT_BYTES = 256 * 1024 * 1024
 RESTORE_DELAY_MS = 400
@@ -90,6 +90,9 @@ class TextInjector(QObject):
         if target and winapi.foreground_window() != target:
             self.copy_only(text, "The window changed, so the text was copied. Press Ctrl+V to paste.")
             return
+        if winapi.window_needs_admin(target or winapi.foreground_window()):
+            self.copy_only(text, "That window runs as administrator or another user, so the text was copied. Press Ctrl+V to paste.")
+            return
         self._busy = True
         snapshot = snapshot_clipboard(self.clipboard)
         previous_text = self.clipboard.text()
@@ -119,7 +122,8 @@ class TextInjector(QObject):
             QTimer.singleShot(RESTORE_DELAY_MS, lambda: restore(sent))
 
         def restore(sent):
-            if snapshot is not None and winapi.clipboard_sequence() == ours:
+            # Not pasted: the text stays on the clipboard, or it would be lost.
+            if sent and snapshot is not None and winapi.clipboard_sequence() == ours:
                 self._suppress(previous_text)
                 self.clipboard.setMimeData(snapshot)
             self._busy = False
@@ -145,20 +149,25 @@ class TextInjector(QObject):
         self.clipboard.setText(text)
 
         def paste():
-            kb = Controller()
-            # A stop hotkey may still be held: Ctrl+Alt+V would be another command.
-            held = (Key.alt, Key.alt_gr, Key.cmd) + (() if self.keystroke == "shift+insert" else (Key.shift,))
-            for key in held:
-                try:
-                    kb.release(key)
-                except Exception:
-                    pass
-            if self.keystroke == "shift+insert":
-                with kb.pressed(Key.shift):
-                    kb.tap(Key.insert)
-            else:
-                with kb.pressed(Key.ctrl):
-                    kb.tap("v")
+            try:
+                kb = Controller()
+                # A stop hotkey may still be held: Ctrl+Alt+V would be another command.
+                held = (Key.alt, Key.alt_gr, Key.cmd) + (() if self.keystroke == "shift+insert" else (Key.shift,))
+                for key in held:
+                    try:
+                        kb.release(key)
+                    except Exception:
+                        pass
+                if self.keystroke == "shift+insert":
+                    with kb.pressed(Key.shift):
+                        kb.tap(Key.insert)
+                else:
+                    with kb.pressed(Key.ctrl):
+                        kb.tap("v")
+            except Exception as exc:  # never stay "busy"; the text is still on the clipboard
+                self._busy = False
+                self.finished.emit(False, f"Could not paste ({exc}), so the text was copied. Press Ctrl+V to paste.")
+                return
             QTimer.singleShot(RESTORE_DELAY_MS, restore)
 
         def restore():
@@ -180,7 +189,7 @@ class TextInjector(QObject):
             self.finished.emit(False, "Copied to clipboard. Press Ctrl+V to paste (install wtype to paste automatically).")
             return
         try:
-            subprocess.Popen(wtype_command(tool, self.keystroke))
+            subprocess.Popen(wtype_command(tool, self.keystroke), env=child_env())
         except OSError:
             self.finished.emit(False, "Copied to clipboard. Press Ctrl+V to paste.")
             return

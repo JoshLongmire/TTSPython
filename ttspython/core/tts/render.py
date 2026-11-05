@@ -19,7 +19,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from ..platform import IS_WINDOWS
+from ..platform import IS_WINDOWS, child_env
 from .wavparse import parse_wav
 
 
@@ -185,7 +185,8 @@ class EspeakRenderer:
             raise RuntimeError("espeak-ng is not installed")
 
     def list_voices(self):
-        out = subprocess.run([self.binary, "--voices"], capture_output=True, text=True, timeout=10).stdout
+        out = subprocess.run([self.binary, "--voices"], capture_output=True, text=True, timeout=10,
+                             env=child_env()).stdout
         voices = []
         for line in out.splitlines()[1:]:
             parts = line.split()
@@ -201,7 +202,8 @@ class EspeakRenderer:
         cmd = [self.binary, "-s", str(int(wpm)), "-a", "100", "-b", "1", "--stdout"]
         if voice_id:
             cmd[1:1] = ["-v", voice_id]
-        proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                env=child_env())
         result = {}
 
         def run():

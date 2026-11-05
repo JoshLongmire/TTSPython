@@ -12,14 +12,14 @@ Pick the voice in **Settings > Speech > Voice**, or in the mini bar's popover (c
 ## Natural voices (Piper)
 
 1. Open **Settings > Speech** and press **Get more voices**. Pick a language, and type in the filter box to narrow the list by name, country or quality.
-2. Choose a **language**. Each voice is listed with its country, quality (small, medium or best) and download size.
+2. Choose a **language**. Each voice is listed with its country, quality (smallest, small, medium or best) and download size.
 3. Not sure which one? **Hear samples online** opens the official sample page, where you can listen to each voice.
 4. Select a voice and press **Download** (or double-click it). Most voices are about 60 MB; the "best" ones about
    115 MB. The first voice also downloads the Piper program (about 23 MB).
 5. Press **Use this voice**. It is used for speech and export right away, and it shows up in the voice lists.
 
 Good English voices to start with: **Lessac** (United States, medium), **Amy** (United States, medium),
-**Ryan** (United States, high), **Alan** and **Cori** (United Kingdom).
+**Ryan** (United States, best), **Alan** and **Cori** (Great Britain).
 
 Things to know:
 - There are 178 voices in 53 languages. Each one is downloaded once; after that it works without internet.
@@ -73,7 +73,7 @@ Windows language packs can need a sign-out and sign-in before Windows reports th
 **A Piper download fails**: check the internet connection and try again. Downloads come from GitHub (the
 program) and Hugging Face (the voices); a company firewall may block them.
 
-**"There is no Piper build for this computer"**: Piper is available for 64-bit Windows and for Linux on x86-64
+**"Piper voices are not available for this computer's processor"**: Piper is available for 64-bit Windows and for Linux on x86-64
 and ARM64. On other systems, use the system voices.
 
 **A voice sounds robotic**: try a Piper voice in "medium" or "best" quality.

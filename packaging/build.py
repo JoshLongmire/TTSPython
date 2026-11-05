@@ -9,9 +9,11 @@ Usage: python packaging/build.py [--no-archive]
 from __future__ import annotations
 
 import argparse
+import importlib.metadata
 import json
 import os
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -27,6 +29,96 @@ from ttspython import APP_NAME, __version__  # noqa: E402
 
 def folder_size(path):
     return sum(os.path.getsize(os.path.join(d, f)) for d, _, files in os.walk(path) for f in files)
+
+
+# What requirements.txt brings in. PyAV is left out of the build (see TTSPython.spec).
+LICENSE_ROOTS = ("PySide6-Essentials", "pyttsx3", "comtypes", "pynput", "numpy", "sounddevice", "lameenc",
+                 "faster-whisper", "sherpa-onnx")
+NOT_BUNDLED = {"av"}
+NOTICE_INTRO = f"""{APP_NAME} is free software under the MIT License (see LICENSE.txt). It includes the components below,
+each under its own license.
+
+Qt and PySide6 are used unmodified under the GNU Lesser General Public License v3. Source: https://code.qt.io. You may
+replace their libraries in the _internal/PySide6 folder. LAME (through lameenc) is under the LGPL too. Source:
+https://lame.sourceforge.io. The full texts of the LGPL and the GPL are below, with lameenc and numpy.
+CTranslate2 ships Intel's OpenMP runtime (libiomp5md.dll) and a small cuDNN loader (cudnn64_9.dll), included as it provides them.
+This package also includes Python (PSF License, https://docs.python.org/3/license.html) and PortAudio (MIT License,
+https://www.portaudio.com/license.html).
+
+Not included: Piper voices, the Piper program and the speech recognition models are downloaded only when you ask for
+them, and keep their own licenses. (Piper includes eSpeak NG, GPL-3.0, and runs as a separate program.)
+"""
+
+
+def _dist_key(name):
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def _marker_applies(marker):
+    from packaging.markers import Marker
+
+    return Marker(marker).evaluate()
+
+
+def bundled_distributions(roots=LICENSE_ROOTS):
+    """The installed packages the roots depend on, on this OS, by normalized name."""
+    found = {}
+    pending = list(roots)
+    while pending:
+        name = pending.pop()
+        key = _dist_key(name)
+        if key in found or key in NOT_BUNDLED:
+            continue
+        try:
+            dist = importlib.metadata.distribution(name)
+        except importlib.metadata.PackageNotFoundError:
+            continue
+        found[key] = dist
+        for requirement in dist.requires or []:
+            spec, _, marker = requirement.partition(";")
+            marker = marker.strip()
+            if "extra" in marker or (marker and not _marker_applies(marker)):
+                continue
+            pending.append(re.match(r"[A-Za-z0-9._-]+", spec.strip()).group())
+    return found
+
+
+def _license_files(dist):
+    """Its license and notice files: in its metadata folder, or next to its code."""
+    return [file for file in dist.files or []
+            if re.search(r"licen[cs]e|copying|notice", file.name, re.I) and "commercial" not in file.name.lower()
+            and file.suffix.lower() in ("", ".txt", ".md", ".rst")
+            and (".dist-info" in str(file) or len(file.parts) <= 2)]
+
+
+def third_party_notices():
+    parts = [NOTICE_INTRO]
+    dists = bundled_distributions()
+    for key in sorted(dists):
+        dist = dists[key]
+        meta = dist.metadata
+        kind = meta.get("License-Expression") or (meta.get("License") or "").split("\n")[0].strip() or ", ".join(
+            c.split("::")[-1].strip() for c in meta.get_all("Classifier") or [] if c.startswith("License"))
+        home = meta.get("Home-page") or next((u.split(",", 1)[-1].strip() for u in meta.get_all("Project-URL") or []), "")
+        parts.append(f"{'=' * 78}\n{meta['Name']} {dist.version}\nLicense: {kind or 'see the project page'}\n{home}\n")
+        for file in _license_files(dist):
+            try:
+                with open(file.locate(), encoding="utf-8", errors="replace") as f:
+                    parts.append(f"--- {file.name}\n{f.read().strip()}\n")
+            except OSError:
+                pass
+    notices = "\n".join(parts)
+    for needed in ("GNU LESSER GENERAL PUBLIC LICENSE", "GNU GENERAL PUBLIC LICENSE"):
+        if needed not in notices:  # they come with other packages: a new version could drop them
+            sys.exit(f"Build failed, the notices lack the text of the {needed}")
+    return notices
+
+
+def add_license_files(app_dir):
+    """A package given to people has to carry the licenses of what is in it."""
+    shutil.copy2(os.path.join(ROOT, "LICENSE"), os.path.join(app_dir, "LICENSE.txt"))
+    with open(os.path.join(app_dir, "THIRD_PARTY_LICENSES.txt"), "w", encoding="utf-8") as f:
+        f.write(third_party_notices())
 
 
 def self_test(app_dir):
@@ -69,6 +161,7 @@ def main(argv=None):
             shutil.copy2(os.path.join(HERE, "linux", name), target)
             os.chmod(target, 0o755)
 
+    add_license_files(app_dir)
     print(f"\nBuilt {app_dir} ({folder_size(app_dir) / 1e6:.0f} MB) in {time.perf_counter() - t0:.0f} s")
     if args.check:
         self_test(app_dir)

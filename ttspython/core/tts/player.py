@@ -12,6 +12,7 @@ target rate every 10 ms, so a speed slider is heard while it is being dragged.
 from __future__ import annotations
 
 import collections
+import contextlib
 import math
 import queue
 import threading
@@ -194,6 +195,9 @@ class AudioPlayer:
                 break
             except Exception as exc:  # device rejects the rate: try its default
                 error = exc
+                if stream is not None:  # it opened but would not start: do not leave it open
+                    with contextlib.suppress(Exception):
+                        stream.close()
                 stream = None
         stale = None
         with self._lock:

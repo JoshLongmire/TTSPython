@@ -284,7 +284,8 @@ class VoiceBrowser(QDialog):
             self.status.setText("This voice is in use. Pick another voice first, then remove it.")
             return
         self._remove(key)
-        self.status.setText("Removed.")
+        removed = key not in piper.installed_keys()
+        self.status.setText("Removed." if removed else "Could not remove this voice. Close what is using it and try again.")
         self.voices_changed.emit()
         self._fill()
 
@@ -295,3 +296,7 @@ class VoiceBrowser(QDialog):
     def closeEvent(self, event):  # noqa: N802
         self._cancel_download()
         super().closeEvent(event)
+
+    def reject(self):  # Esc: closes without a closeEvent
+        self._cancel_download()
+        super().reject()

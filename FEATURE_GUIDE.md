@@ -15,7 +15,7 @@
 - **Speak from here** (`Ctrl+Alt+Enter`, or right-click in the editor) reads from the start of the sentence where the cursor is to the end.
 - **Stop** (`Esc`) ends speech immediately.
 - The **sentence being read is highlighted** and the editor scrolls to keep it in view. Editing the text while it reads simply turns the highlight off for that run. You can disable highlighting in Settings > Speech.
-- **Speed** goes from 50% to 200% (100% is the old 200 words per minute) and **volume** from 10% to 100%. Both change **while it speaks**: drag the speed slider and every step is heard as you drag (within 10 ms), mid-sentence, with the same pitch. Behind the scenes the audio is time-stretched as it plays, 10 ms at a time, and once you let go the next sentences are prepared again at the new speed for the most natural sound.
+- **Speed** goes from 50% to 200% (100% is the old 200 words per minute) and **volume** from 10% to 100%. Both change **while it speaks**: drag the speed slider and every step is heard as you drag (within 16 ms), mid-sentence, with the same pitch. Behind the scenes the audio is time-stretched as it plays, 10 ms at a time, and once you let go the next sentences are prepared again at the new speed for the most natural sound.
 - **Voice**: pick it in Settings > Speech or the mini bar's popover. Changing it while speaking continues from the word being read, in the new voice.
 - **More voices**: Settings > Speech > **Get more voices** downloads natural-sounding Piper voices (see [ADD_VOICES_GUIDE.md](ADD_VOICES_GUIDE.md)). On Windows, the Windows 11 speech voices are listed next to the classic ones.
 - **Output device**: pick where speech plays in Settings > Speech and press **Test** (Cancel puts back your saved choice). Every device from every audio system is listed; ones outside the default system show it in brackets, for example "(WASAPI)". The choice is remembered by device name, so it survives unplugging and reconnecting. A device plugged in after start shows up when Settings opens, or with **Refresh**.
@@ -63,7 +63,7 @@ Toggle style: press once to start, again to stop.
 | Show or hide mini mode | `Ctrl+Alt+Shift+M` |
 | Pause or resume speech, Show main window | unassigned |
 
-Change them in **Settings > Shortcuts**. If another program already owns a combination, the row says so, the status bar says so at start, and a pop-up tells you once (the first time that key is found taken). TTSPython tries again a few seconds after starting, in case the key was only busy for a moment. Mini mode moved to `Ctrl+Alt+Shift+M` because other apps often take `Ctrl+Alt+M`; settings saved by earlier 5.0 builds keep their keys. On Wayland, use the command-line options (`--toggle-dictation`, `--speak-clipboard`, `--stop`, `--pause`, `--mini`, `--show`) from a desktop keyboard shortcut instead.
+Change them in **Settings > Shortcuts**. If another program already owns a combination, the row says so, the status bar says so at start, and a pop-up tells you once (the first time that key is found taken). TTSPython tries again a few seconds after starting, in case the key was only busy for a moment. On Wayland, use the command-line options (`--toggle-dictation`, `--speak-clipboard`, `--stop`, `--pause`, `--mini`, `--show`) from a desktop keyboard shortcut instead.
 
 ## Speech queue
 
@@ -101,7 +101,7 @@ In the status bar (or Settings > Clipboard):
 
 - **Open** reads UTF-8 (with or without BOM), UTF-16 and Windows-1252 text and remembers the file's encoding and line endings; **Save** writes them back the same way, so an unchanged file stays byte-for-byte identical.
 - **New** (`Ctrl+N`) starts an empty document. Drop a text file on the editor to open it. The Open button's arrow lists the last 8 files.
-- Opening a file, New, closing the window or quitting asks before discarding unsaved changes.
+- Opening a file, New, closing the window or quitting asks first if there are unsaved changes: **Save**, **Discard** or **Cancel** (Enter saves). Quitting also asks if an export or a dictation is still running.
 - Unsaved text is kept every 30 seconds (and when Windows logs off or shuts down) and put back the next time TTSPython starts, even after a crash.
 
 ## Themes and appearance

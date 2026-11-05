@@ -232,8 +232,11 @@ def test_unsaved_text_survives_logoff(qtbot, tmp_path):
         assert again.restore_recovery()
         assert again.editor.toPlainText() == "Draft words that were never saved."
         assert again.editor.document().isModified()
-        assert not os.path.exists(again._recovery_path())
-        assert again.restore_recovery() is False  # restored once only
+        assert os.path.exists(again._recovery_path())  # kept until replaced: a second crash loses nothing
+        again.editor.document().setModified(False)
+        again.editor.setPlainText("")
+        again.quit(keep_draft=False)
+        assert not os.path.exists(again._recovery_path())  # a clean end removes it
     finally:
         again.editor.document().setModified(False)
         again.quit()
@@ -267,7 +270,7 @@ def test_choosing_discard_leaves_no_recovery(qtbot, tmp_path, monkeypatch):
     c.editor.setPlainText("Throw this away.")
     c.editor.document().setModified(True)
     c._on_commit_data(None)  # an earlier logoff that was cancelled
-    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.Yes)
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.Discard)
     c.request_quit()
     assert c._quitting
     assert not os.path.exists(c._recovery_path())

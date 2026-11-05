@@ -23,7 +23,7 @@ cat > "$APPS/ttspython.desktop" <<DESKTOP
 Type=Application
 Name=TTSPython
 Comment=Offline text-to-speech and dictation
-Exec=$DEST/TTSPython
+Exec="$DEST/TTSPython"
 Icon=ttspython
 Terminal=false
 Categories=Utility;Accessibility;AudioVideo;
@@ -31,11 +31,11 @@ Actions=Mini;Dictate;
 
 [Desktop Action Mini]
 Name=Show the mini bar
-Exec=$DEST/TTSPython --mini
+Exec="$DEST/TTSPython" --mini
 
 [Desktop Action Dictate]
 Name=Start or stop dictation
-Exec=$DEST/TTSPython --toggle-dictation
+Exec="$DEST/TTSPython" --toggle-dictation
 DESKTOP
 command -v update-desktop-database >/dev/null && update-desktop-database "$APPS" >/dev/null 2>&1 || true
 
@@ -43,7 +43,7 @@ echo "Installed to $DEST"
 echo "Start it from your app menu or with: ttspython"
 missing=""
 command -v espeak-ng >/dev/null || missing="$missing espeak-ng"
-ldconfig -p 2>/dev/null | grep -q libportaudio.so || missing="$missing libportaudio2"
+{ ldconfig -p 2>/dev/null || /sbin/ldconfig -p 2>/dev/null; } | grep libportaudio.so >/dev/null || missing="$missing libportaudio2"
 if [ -n "$missing" ]; then
     echo "Also needed for speech and audio:$missing"
     echo "  Debian/Ubuntu: sudo apt install$missing"

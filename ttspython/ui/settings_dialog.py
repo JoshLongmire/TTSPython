@@ -234,6 +234,7 @@ class SettingsDialog(QDialog):
         self.setMinimumSize(660, 440)
         self.resize(920, 640)
         self.saved_values = copy.deepcopy(ctx.settings.data)
+        self._moving_live = False
         self.values = copy.deepcopy(self.saved_values)
         self._hotkeys_paused = False
         self._closing_handled = False
@@ -417,6 +418,10 @@ class SettingsDialog(QDialog):
         irow.addWidget(self.input)
         irow.addWidget(self._refresh_devices_button())
         self._row(lay, "Microphone", irow)
+        self.input_note = QLabel()
+        self.input_note.setObjectName("ErrorText")
+        self.input_note.hide()
+        lay.addWidget(self.input_note)
         self.meter = MicMeter()
         self._row(lay, "Input level", self.meter, "Speak to check the microphone is picking you up.")
         self.model = _shrinkable(18)
@@ -574,8 +579,9 @@ class SettingsDialog(QDialog):
     def refresh_devices(self):
         self.meter.stop()
         ok = self.ctx.rescan_devices()
-        self.device_note.setText("" if ok else "Stop speech and dictation first, then refresh.")
-        self.device_note.setVisible(not ok)
+        for note in (self.device_note, self.input_note):  # the button is on both pages
+            note.setText("" if ok else "Stop speech and dictation first, then refresh.")
+            note.setVisible(not ok)
         self._fill_devices(self.output, "output", self.output.currentData())
         self._fill_devices(self.input, "input", self.input.currentData())
         self._restart_meter()
@@ -760,6 +766,10 @@ class SettingsDialog(QDialog):
             self.models_box.addWidget(row)
 
     def _delete_model(self, name):
+        answer = QMessageBox.question(self, "Delete model", f"Delete the {name} model? It will be downloaded again "
+                                      "the next time it is needed.", QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if answer != QMessageBox.Yes:
+            return
         message = self.ctx.delete_model(name)
         if message:
             self.model_note.setText(message)
@@ -838,11 +848,29 @@ class SettingsDialog(QDialog):
 
     def _rate_moved(self, percent):
         self.rate_label.setText(f"{percent}%")
+        self._moving_live = True
         self.ctx.set_speech_rate(settings_mod.percent_wpm(percent))
+        self._moving_live = False
 
     def _volume_moved(self, value):
         self.volume_label.setText(f"{value}%")
+        self._moving_live = True
         self.ctx.set_speech_volume(value / 100.0)
+        self._moving_live = False
+
+    def sync_live_value(self, key, value):
+        """Speed or volume moved outside this window: show it here, and closing must not undo it."""
+        if self._moving_live:
+            return
+        self.saved_values[key] = value
+        if key == "tts_rate":
+            slider, label, shown = self.rate, self.rate_label, settings_mod.speed_percent(value)
+        else:
+            slider, label, shown = self.volume, self.volume_label, int(round(value * 100))
+        slider.blockSignals(True)
+        slider.setValue(shown)
+        slider.blockSignals(False)
+        label.setText(f"{slider.value()}%")
 
     def _restore_live_values(self):
         """Speed and volume moved here are live; Cancel (or closing unsaved) puts them back."""
@@ -873,8 +901,10 @@ class SettingsDialog(QDialog):
         fresh = settings_mod.defaults()
         self.values.update({k: fresh[k] for k in self.form_values()})
         self.values.update(tts_rate=fresh["tts_rate"], tts_volume=fresh["tts_volume"])
-        self.ctx.set_speech_rate(fresh["tts_rate"])  # these two apply as they move, here as well
+        self._moving_live = True  # these two apply as they move, here as well; Cancel still undoes them
+        self.ctx.set_speech_rate(fresh["tts_rate"])
         self.ctx.set_speech_volume(fresh["tts_volume"])
+        self._moving_live = False
         self._load_fields(self.values)
         self.preview_theme.emit(self.values["theme_preset"])
 

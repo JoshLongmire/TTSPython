@@ -19,7 +19,7 @@ import weakref
 from dataclasses import dataclass
 
 from ..download import fetch
-from ..platform import IS_WINDOWS, data_dir
+from ..platform import IS_WINDOWS, child_env, data_dir
 from ..settings import NORMAL_WPM
 from .render import Cancelled, Voice
 from .wavparse import parse_wav
@@ -177,10 +177,14 @@ def install_program(progress=None, cancel=None, opener=None):
                     t.extractall(unpack)  # noqa: S202 (checksum-verified official archive)
         src = os.path.join(unpack, "piper")
         target = program_dir()
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        # Copied in full first (it may cross drives): stopping halfway must not leave a half program.
+        staging = target + ".new"
+        shutil.rmtree(staging, ignore_errors=True)
+        shutil.move(src, staging)
         if os.path.isdir(target):
             shutil.rmtree(target, ignore_errors=True)
-        os.makedirs(os.path.dirname(target), exist_ok=True)
-        shutil.move(src, target)
+        os.replace(staging, target)
         if not IS_WINDOWS:
             os.chmod(program_path(), 0o755)
         return program_path()
@@ -234,16 +238,22 @@ class _Process:
         self.length_scale = length_scale
         self.out_dir = tempfile.mkdtemp(prefix="ttspython-piper-out-")
         self.stderr_path = os.path.join(self.out_dir, "stderr.txt")
-        env = dict(os.environ)
+        env = child_env()
         if not IS_WINDOWS:
             env["LD_LIBRARY_PATH"] = program_dir() + os.pathsep + env.get("LD_LIBRARY_PATH", "")
-        with open(self.stderr_path, "wb") as stderr:  # a file: a full pipe would stall the program
-            self.proc = subprocess.Popen(
-                [program_path(), "--model", model_path(key), "--json-input", "--quiet",
-                 "--length_scale", f"{length_scale:.3f}", "--sentence_silence", "0.15",
-                 "--espeak_data", os.path.join(program_dir(), "espeak-ng-data")],
-                stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=stderr, env=env,
-                cwd=program_dir(), creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        # Relative paths: Piper crashes on absolute ones holding a non-English user name.
+        model = os.path.relpath(model_path(key), program_dir())
+        try:
+            with open(self.stderr_path, "wb") as stderr:  # a file: a full pipe would stall the program
+                self.proc = subprocess.Popen(
+                    [program_path(), "--model", model, "--json-input", "--quiet",
+                     "--length_scale", f"{length_scale:.3f}", "--sentence_silence", "0.15",
+                     "--espeak_data", "espeak-ng-data"],
+                    stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=stderr, env=env,
+                    cwd=program_dir(), creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        except OSError:
+            shutil.rmtree(self.out_dir, ignore_errors=True)
+            raise
         self.count = 0
 
     def alive(self):

@@ -47,6 +47,11 @@ def _progress_key(text):
     return re.sub(r"\d+", "#", text) if text.startswith(("Downloading", "Still downloading")) else None
 
 
+def _saved_text(editor):
+    """The text for a file. Raw: toPlainText would turn every no-break space into a plain one."""
+    return editor.document().toRawText().replace("\u2029", "\n").replace("\u2028", "\n")
+
+
 class AppController(QObject):
     devices_resolved = Signal(object)
 
@@ -282,7 +287,7 @@ class AppController(QObject):
         w.queue_panel.list.itemActivated.connect(lambda item: self.queue_play(item.data(QUEUE_ID_ROLE)))
         w.queue_panel.list.files_dropped.connect(self.queue_add_paths)
         w.queue_panel.list.menu_requested.connect(self._queue_menu)
-        self.editor.files_dropped.connect(lambda paths: self.open_path(paths[0]))
+        self.editor.files_dropped.connect(self._files_dropped_on_editor)
         self.editor.menu_actions = [self.actions["speak_from_cursor"], self.actions["speak_selected"]]
         self.editor.document().modificationChanged.connect(lambda _m: self._update_title())
         self.editor.document().contentsChanged.connect(self._draft_changed)
@@ -594,6 +599,8 @@ class AppController(QObject):
         self._sync_reading_speed()
         if self.window.transport.rate.value() != speed_percent(wpm):
             self.window.transport.set_values(wpm, self.speech.volume)
+        if self._settings_dialog is not None:
+            self._settings_dialog.sync_live_value("tts_rate", int(wpm))
         self.save_soon()
 
     # Speed and volume sliders in the settings dialog apply live, like the bar's.
@@ -608,6 +615,8 @@ class AppController(QObject):
         self.settings.set("tts_volume", round(float(volume), 2))
         if self.window.transport.volume.value() != int(round(volume * 100)):
             self.window.transport.set_values(self.speech.rate, volume)
+        if self._settings_dialog is not None:
+            self._settings_dialog.sync_live_value("tts_volume", round(float(volume), 2))
         self.save_soon()
 
     def _set_voice(self, vid):
@@ -751,7 +760,9 @@ class AppController(QObject):
         item = self.queue.get(item_id)
         if item is None or not self._confirm_discard():
             return
+        self._stop_reading_editor()
         self.editor.setPlainText(item.text)
+        self._forget_document()  # Ctrl+S must not write this over the file that was open
         self.editor.document().setModified(True)
         self._status(f"Copied \"{item.name}\" to the editor")
 
@@ -764,6 +775,8 @@ class AppController(QObject):
             with open(self._queue_path(), "r", encoding="utf-8") as f:
                 items = json.load(f).get("items", [])
         except (OSError, ValueError, AttributeError):
+            return
+        if not isinstance(items, list):
             return
         self.queue.add_many(((item["text"], str(item.get("name") or preview(item["text"])), str(item.get("kind") or "text"))
                              for item in items
@@ -792,7 +805,8 @@ class AppController(QObject):
         n = len(self.queue)
         if not n:
             return
-        answer = QMessageBox.question(self.window, "Clear queue", f"Remove all {n} items from the queue?")
+        answer = QMessageBox.question(self.window, "Clear queue", f"Remove all {n} items from the queue?",
+                                      QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
         if answer == QMessageBox.Yes:
             if self.speech.playing_item_id:
                 self.speech.stop()
@@ -1023,7 +1037,7 @@ class AppController(QObject):
 
     def _apply_mode_enabled(self):
         tts = self.settings["mode"] == "tts"
-        self.actions["speak_all"].setEnabled(tts)
+        self.actions["speak_all"].setEnabled(tts or self.speech.busy)  # it also pauses
         self.actions["speak_selected"].setEnabled(tts)
         self.actions["play_pause"].setEnabled(tts or self.speech.busy)
         self._update_play_tip()
@@ -1031,8 +1045,35 @@ class AppController(QObject):
     def _confirm_discard(self):
         if not self.editor.document().isModified() or not self.editor.toPlainText():
             return True
-        answer = QMessageBox.question(self.window, "Unsaved changes", "Discard the unsaved changes in the editor?")
+        answer = QMessageBox.question(self.window, "Unsaved changes", "Save the changes in the editor?",
+                                      QMessageBox.Save | QMessageBox.Discard | QMessageBox.Cancel, QMessageBox.Save)
+        if answer == QMessageBox.Save:
+            self.on_save()
+            return not self.editor.document().isModified()  # still modified: cancelled or could not save
+        if answer == QMessageBox.Discard:
+            self._clear_recovery()  # a crash in the next moments must not bring it back
+            return True
+        return False
+
+    def _confirm_quit(self):
+        """Ask first if quitting would lose editor text or work still running."""
+        if not self._confirm_discard():
+            return False
+        running = []
+        if self.exporter.running:
+            running.append("An audio export is still running.")
+        if self.stt.state is not SttState.IDLE:
+            running.append("A dictation is still in progress.")
+        if not running:
+            return True
+        answer = QMessageBox.question(self.window, "Quit TTSPython", " ".join(running) + " Quit anyway?",
+                                      QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
         return answer == QMessageBox.Yes
+
+    def _stop_reading_editor(self):
+        """Speech from the editor would go on over text that has been replaced."""
+        if self.speech.busy and self.speech.current_source not in (Source.QUEUE, Source.CLIPBOARD):
+            self.speech.stop()
 
     def on_open(self):
         if not self._confirm_discard():
@@ -1052,6 +1093,7 @@ class AppController(QObject):
             self._error("Open failed", f"Could not read {os.path.basename(path)}: {exc}")
             self._forget_recent(path)
             return
+        self._stop_reading_editor()
         self.editor.setPlainText(doc.text)
         self.editor.document().setModified(False)
         self.current_file, self.current_doc = path, doc
@@ -1059,6 +1101,15 @@ class AppController(QObject):
         self._remember_recent(path)
         self._update_title()
         self._status(f"Opened {os.path.basename(path)}")
+        if doc.lossy:
+            self._toast("This file may use an encoding TTSPython cannot read, so some characters can look wrong. "
+                        "Save will ask where to save, so the original stays as it is.", 7000)
+
+    def _files_dropped_on_editor(self, paths):
+        self.open_path(paths[0])
+        opened = self.current_file == paths[0]
+        if len(paths) > 1 and opened and not self.current_doc.lossy:  # that notice matters more
+            self._toast("The editor holds one file. To read several, drop them on the queue.")
 
     def on_new(self):
         if not self._confirm_discard():
@@ -1116,7 +1167,7 @@ class AppController(QObject):
         button.setPopupMode(QToolButton.MenuButtonPopup)
 
     def on_save(self):
-        if not self.current_file:
+        if not self.current_file or (self.current_doc and self.current_doc.lossy):
             self.on_save_as()
             return
         self._write(self.current_file)
@@ -1150,15 +1201,16 @@ class AppController(QObject):
         doc = self.current_doc if self.current_file == path else None
         wanted = doc.encoding if doc else "utf-8"
         try:
-            used = textio.write_text_file(path, self.editor.toPlainText(), wanted,
+            used = textio.write_text_file(path, _saved_text(self.editor), wanted,
                                           doc.newline if doc else None, doc.bom if doc else False)
-        except OSError as exc:
+        except (OSError, UnicodeError) as exc:
             QMessageBox.warning(self.window, "Save failed", f"Could not save this file:\n{exc}")
             return
         if doc is None:
             self.current_doc = textio.TextDocument(self.editor.toPlainText(), used, os.linesep)
         else:
             doc.encoding = used
+            doc.lossy = False  # the user chose to replace this file
         self.current_file = path
         self.editor.document().setModified(False)
         self.window.editor_card.set_title(os.path.basename(path))
@@ -1399,6 +1451,7 @@ class AppController(QObject):
         self._apply_global_hotkeys()
         self.save_now()
         self._status("Settings saved")
+        self._report_hotkey_errors()
 
     # --- context for the settings dialog ---
     def voices(self):
@@ -1591,7 +1644,7 @@ class AppController(QObject):
             self.window.hide()
             self._toast("TTSPython is still running in the tray.")
             return
-        if not self._confirm_discard():
+        if not self._confirm_quit():
             event.ignore()
             return
         event.accept()
@@ -1599,9 +1652,10 @@ class AppController(QObject):
 
     def request_quit(self):
         """Quit from the tray or the command line: ask first if the editor has unsaved text."""
-        if self.editor.document().isModified() and self.editor.toPlainText():
+        modified = self.editor.document().isModified() and self.editor.toPlainText()
+        if modified or self.exporter.running or self.stt.state is not SttState.IDLE:
             self.show_window()
-            if not self._confirm_discard():
+            if not self._confirm_quit():
                 return
         self.quit(keep_draft=False)
 
@@ -1624,7 +1678,7 @@ class AppController(QObject):
         doc = self.current_doc
         data = {"text": self.editor.toPlainText(), "file": self.current_file,
                 "encoding": doc.encoding if doc else None, "newline": doc.newline if doc else None,
-                "bom": bool(doc.bom) if doc else False}
+                "bom": bool(doc.bom) if doc else False, "lossy": bool(doc.lossy) if doc else False}
         try:
             write_json_atomic(self._recovery_path(), data)
         except OSError:
@@ -1644,16 +1698,18 @@ class AppController(QObject):
                 data = json.load(f)
         except (OSError, ValueError):
             return False
-        self._clear_recovery()
         text = data.get("text") if isinstance(data, dict) else None
         if not isinstance(text, str) or not text:
+            self._clear_recovery()
             return False
+        # The file stays until the next draft or a clean quit replaces it: a second crash must not lose the text.
         self.editor.setPlainText(text)
         file = data.get("file")
         if isinstance(file, str) and file:
             self.current_file = file
             self.current_doc = textio.TextDocument(text, data.get("encoding") or "utf-8",
-                                                   data.get("newline") or os.linesep, bool(data.get("bom")))
+                                                   data.get("newline") or os.linesep, bool(data.get("bom")),
+                                                   bool(data.get("lossy")))
             self.window.editor_card.set_title(os.path.basename(file))
         self.editor.document().setModified(True)
         return True
