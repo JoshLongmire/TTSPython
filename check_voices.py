@@ -4,9 +4,9 @@ Quick script to check what TTS voices are installed on your system.
 Uses the same speech engine as the app (SAPI5 on Windows, espeak-ng on Linux).
 """
 
+import contextlib
 import os
 import sys
-import contextlib
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
