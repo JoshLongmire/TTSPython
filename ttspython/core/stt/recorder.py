@@ -126,7 +126,7 @@ class Recorder:
             audio = np.concatenate(blocks).astype(np.float32)
             audio *= 1.0 / 32768.0
             return audio
-        # Block by block: all at once took 2.2 GB for half an hour of recording.
+        # Block by block: all at once took 146 MB for 2 minutes of recording, which grows with its length.
         converter = StreamResampler(self._capture_rate, self.sample_rate)
         parts = [converter.feed(block.astype(np.float32) * (1.0 / 32768.0)) for block in blocks]
         parts.append(converter.finish())

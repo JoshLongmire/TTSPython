@@ -14,7 +14,7 @@
 - Settings: one bad value no longer resets all of them. A file held by another program at start is no longer replaced by
   the defaults on the next save, and a size too big for the screen can no longer stop the app from starting.
 - Stopping a long recording on a microphone that runs at its own rate takes far less memory (2 minutes: 146 MB before, under
-  40 MB now, and half an hour was about 2.2 GB).
+  40 MB now).
 - Your own voice: the speed no longer jumps in the middle of a sentence. The voice's pace is saved with it, so the first
   sentence after a restart is at the right speed too. A second voice no longer gets the wrong name.
 - A window saved on a bigger monitor now fits a smaller one, and the main window and the voice window now fit a small laptop
