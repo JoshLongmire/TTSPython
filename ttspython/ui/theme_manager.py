@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import stat
 import tempfile
 
 from PySide6.QtCore import QObject, Signal
@@ -12,6 +13,15 @@ from . import icons
 from .style import build_palette, build_qss, ui_font
 
 
+def _is_private_folder(path):
+    """Is this a real folder that only this user can write to? /tmp is shared on Linux, so another
+    user could have made it first, or planted a link there."""
+    if not hasattr(os, "getuid"):
+        return os.access(path, os.W_OK)
+    info = os.lstat(path)
+    return stat.S_ISDIR(info.st_mode) and info.st_uid == os.getuid() and not info.st_mode & 0o022
+
+
 def _asset_dir():
     """A folder for the SVG files the style sheet points at, owned by this user.
 
@@ -20,8 +30,8 @@ def _asset_dir():
     user = str(os.getuid()) if hasattr(os, "getuid") else ""
     path = os.path.join(tempfile.gettempdir(), "ttspython-ui" + (f"-{user}" if user else ""))
     try:
-        os.makedirs(path, exist_ok=True)
-        if os.access(path, os.W_OK):
+        os.makedirs(path, mode=0o700, exist_ok=True)
+        if _is_private_folder(path):
             return path
     except OSError:
         pass

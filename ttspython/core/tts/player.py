@@ -67,7 +67,7 @@ class _Segment:
 
 
 class AudioPlayer:
-    def __init__(self, events: "queue.Queue", sd_module=None, preferred_rate=22050, idle_close=15.0):
+    def __init__(self, events: queue.Queue, sd_module=None, preferred_rate=22050, idle_close=15.0):
         self._events = events
         self._sd = sd_module
         self._preferred_rate = preferred_rate

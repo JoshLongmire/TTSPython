@@ -314,7 +314,9 @@ def write_json_atomic(path, data):
     folder = os.path.dirname(os.path.abspath(path))
     os.makedirs(folder, exist_ok=True)
     tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
+    # This user only: the queue and the unsaved text can hold anything the person was reading.
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_BINARY", 0), 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
         f.flush()
         os.fsync(f.fileno())
@@ -322,7 +324,7 @@ def write_json_atomic(path, data):
 
 
 def _read_json(path):
-    with open(path, "r", encoding="utf-8-sig") as f:  # -sig: editors may save it with a byte order mark
+    with open(path, encoding="utf-8-sig") as f:  # -sig: editors may save it with a byte order mark
         return json.load(f)
 
 

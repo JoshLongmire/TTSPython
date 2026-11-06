@@ -30,7 +30,7 @@
 - Press record, speak, press again. The transcript is cleaned up (capital first letter, final punctuation) and added to the editor.
 - When dictating into another app (the mini bar's mic or `Ctrl+Alt+D`), a **caption bubble** above the bar shows each word about half a second after you say it. A small, fast **instant preview** recognizer shows the words first (a little dimmer); Whisper checks them whenever you pause, or every couple of seconds while you keep talking, and corrects them in place. The newest word is highlighted. The bubble is only as big as the text (up to three lines, larger than the app's text) and grows upward, so the newest words stay right above the bar. **X** or `Esc` cancels the dictation; nothing is typed.
 - Because Whisper checks at each pause, the text is usually ready when you stop: typed almost at once if you paused first, otherwise in about 0.5 to 1.2 seconds. Long dictations settle at real pauses in the audio as you go (never in the middle of a word), so the wait stays short however long you talk.
-- The instant preview works in English (73 MB), French (128 MB) and Chinese (134 MB, which also follows English words mixed in). Its model downloads once in the background the first time you dictate in that language (its progress shows in the status bar only; a pop-up appears only if it fails). With another language, or Auto-detect, the captions come from Whisper alone. While loaded it uses about 140 MB of memory in English and up to 280 MB in Chinese, freed together with the Whisper model when that unloads. Turn it off in **Settings > Listen > Instant live preview**, and delete its model in the downloaded models list.
+- The instant preview works in English (73 MB), French (128 MB) and Chinese (a 134 MB download, 169 MB once unpacked, which also follows English words mixed in). Its model downloads once in the background the first time you dictate in that language (its progress shows in the status bar only; a pop-up appears only if it fails). With another language, or Auto-detect, the captions come from Whisper alone. While loaded it uses about 140 MB of memory in English and up to 280 MB in Chinese, freed together with the Whisper model when that unloads. Turn it off in **Settings > Listen > Instant live preview**, and delete its model in the downloaded models list.
 - Dictation keeps full speed while TTSPython is in the background: Windows 11 runs background apps in efficiency mode, which made each Whisper pass 2.6 times slower, so TTSPython opts out.
 - If the microphone delivers only silence (muted, or blocked in Windows privacy settings), you are told so.
 - **Settings > Listen**:
@@ -45,7 +45,6 @@
 
 - A compact bar that floats above every window. It **never takes keyboard focus**, so the app you were typing in keeps its cursor.
 - **Mic**: dictate into whatever app you are using. The text is typed at the cursor. Your clipboard comes back about 1.5 seconds later, and the dictated text is kept out of Windows clipboard history. If the paste fails, or the window runs as administrator (which ignores simulated typing), the text stays on the clipboard and you are told.
-- **Cancel**: while a dictation model downloads for the first time, Listen shows a **Cancel** button. It stops the download and throws the recording away; the download starts again the next time you dictate.
 - **Play**: reads the text you have highlighted in the app you are using, or the clipboard when nothing is highlighted. Press again to stop.
 - **Waveform**: shows your voice while dictating and the speech while reading.
 - **Chevron or right-click**: a popover for voice, speed and volume, **Pause/Resume**, and Hide mini mode.
@@ -60,7 +59,7 @@ Toggle style: press once to start, again to stop.
 | Action | Default |
 |--------|---------|
 | Start or stop dictation | `Ctrl+Alt+D` |
-| Speak highlighted text or clipboard (again to stop) | `Ctrl+Alt+S` |
+| Speak selection or clipboard (again to stop) | `Ctrl+Alt+S` |
 | Stop speaking | `Ctrl+Alt+X` |
 | Show or hide mini mode | `Ctrl+Alt+Shift+M` |
 | Pause or resume speech, Show main window | unassigned |

@@ -131,7 +131,7 @@ class _X11Hotkeys:
                 self.listener.daemon = True
                 self.listener.start()
             except Exception as exc:
-                return {a: f"Could not listen: {exc}" for a in bindings}
+                return dict.fromkeys(bindings, f"Could not listen: {exc}")
         return results
 
     def stop(self):
@@ -169,7 +169,7 @@ class GlobalHotkeys(QObject):
             return {a: self.reason for a, combo in bindings.items() if combo}
         if not enabled:
             self._backend.set_bindings({})
-            return {a: None for a in bindings}
+            return dict.fromkeys(bindings)
         return self._backend.set_bindings(bindings)
 
     def stop(self):

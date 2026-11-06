@@ -26,6 +26,7 @@ else:
 
 excludes = [
     "av",  # see rthook_no_av.py
+    "_wmi",  # it can crash the app: see ttspython/__init__.py
     "tkinter", "_tkinter", "pytest", "pytestqt", "IPython", "matplotlib", "PIL", "soundcard", "psutil",
     "PySide6.QtQml", "PySide6.QtQuick", "PySide6.QtQuickWidgets", "PySide6.QtPdf", "PySide6.QtOpenGL",
     "PySide6.QtWebEngineCore", "PySide6.QtMultimedia", "PySide6.Qt3DCore",

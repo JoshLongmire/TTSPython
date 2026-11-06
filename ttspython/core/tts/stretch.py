@@ -109,7 +109,7 @@ class Stretcher:
 
     def _region(self, start, length):
         """length input samples from start, zero-padded outside the buffer."""
-        if 0 <= start and start + length <= self.x.size:
+        if start >= 0 and start + length <= self.x.size:
             return self.x[start:start + length]
         out = np.zeros(length, dtype=np.float32)
         a, b = max(0, start), min(self.x.size, start + length)

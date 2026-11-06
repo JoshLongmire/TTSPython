@@ -90,7 +90,7 @@ def test_a_voice_the_user_picks_still_counts(c, monkeypatch):
 def fake_hub(monkeypatch, started, release):
     import huggingface_hub
 
-    def snapshot(repo, allow_patterns=None, local_files_only=False, tqdm_class=None):
+    def snapshot(repo, revision=None, allow_patterns=None, local_files_only=False, tqdm_class=None):
         if local_files_only:
             raise OSError("not downloaded yet")
         started.set()
@@ -135,7 +135,7 @@ def test_a_cancelled_download_stops_at_the_next_progress_step():
 def test_a_download_that_fails_by_itself_still_reports_its_error(monkeypatch):
     import huggingface_hub
 
-    def snapshot(repo, allow_patterns=None, local_files_only=False, tqdm_class=None):
+    def snapshot(repo, revision=None, allow_patterns=None, local_files_only=False, tqdm_class=None):
         raise OSError("no network")
 
     monkeypatch.setattr(huggingface_hub, "snapshot_download", snapshot)

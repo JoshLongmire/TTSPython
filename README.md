@@ -1,6 +1,6 @@
 # TTSPython
 
-A free, open-source, offline text-to-speech (TTS) and speech-to-text (STT) desktop app for Windows and Linux, with a full editor window and a floating mini bar that works over any app. Speech uses your system voices (SAPI5 on Windows, espeak-ng on Linux) or natural-sounding Piper voices you download once, and dictation runs locally with `faster-whisper`. Nothing you read or say leaves your computer.
+A free, open-source, offline text-to-speech (TTS) and speech-to-text (STT) desktop app for Windows and Linux, with a full editor window and a floating mini bar that works over any app. Speech uses your system voices (SAPI5 on Windows, espeak-ng on Linux) or natural-sounding Piper voices you download once, and dictation runs locally with `faster-whisper`. Nothing you read or say leaves your computer: the app only goes online to download the voices and models you ask for.
 
 ![TTSPython main window](assets/screenshots/main.png)
 
@@ -49,7 +49,7 @@ Work even when TTSPython is in the background. All can be changed in **Settings 
 | Action | Default |
 |--------|---------|
 | Start or stop dictation | `Ctrl+Alt+D` |
-| Speak highlighted text or clipboard (press again to stop) | `Ctrl+Alt+S` |
+| Speak selection or clipboard (press again to stop) | `Ctrl+Alt+S` |
 | Stop speaking | `Ctrl+Alt+X` |
 | Show or hide mini mode | `Ctrl+Alt+Shift+M` |
 | Pause or resume speech, Show main window | unassigned |
@@ -83,6 +83,7 @@ Work even when TTSPython is in the background. All can be changed in **Settings 
 - **Windows 10/11** or **Linux** (X11 or Wayland). Linux is a preview in 5.0: it is built and smoke-tested automatically, but has had less hands-on testing than Windows, so please report what you find.
 - To run from source: Python 3.10 or newer (developed on 3.13; the full test suite also passes on 3.10).
 - Python packages (installed by the scripts below): `PySide6-Essentials`, `pyttsx3`, `numpy`, `sounddevice`, `lameenc`, `faster-whisper`, `sherpa-onnx` (the instant live preview), `sentencepiece` (your own voice); on Windows also `comtypes` (talks to the SAPI5 voices; pyttsx3 brings `pywin32` for its fallback driver); on Linux also `pynput`.
+- For your own voice (optional): a microphone, 762 MB of disk space and about 1.2 GB of free memory.
 - Linux system packages: `espeak-ng`, `portaudio`, `xcb-util-cursor` (Debian/Ubuntu: `libxcb-cursor0`). Optional: `wtype` to type dictation at the cursor on Wayland.
 
 ## Installation
@@ -91,17 +92,19 @@ Work even when TTSPython is in the background. All can be changed in **Settings 
 Download the latest build from [Releases](https://github.com/JoshLongmire/TTSPython/releases):
 - **Windows installer:** `TTSPython-<version>-windows-x64-setup.exe`. Installs for your user, with no administrator
   rights, adds a Start menu entry and can be removed in Windows Settings > Apps. Installing a new version over an old
-  one keeps your settings. Uninstalling keeps your settings, voices and models too; to remove those, delete the
-  `TTSPython` folders in `%APPDATA%` and `%LOCALAPPDATA%`.
+  one keeps your settings. Uninstalling asks whether to delete your settings, unsaved text, voices and voice
+  recordings, and keeps them unless you say yes (`unins000.exe /VERYSILENT /DELETEUSERDATA=1` says yes without asking).
+  Speech recognition models are shared with other programs: delete them first in **Settings > Listen**.
 - **Windows zip:** `TTSPython-<version>-windows-x64.zip`. Extract it anywhere and run `TTSPython\TTSPython.exe`.
 - The app is not code-signed, so SmartScreen may warn you about either one: choose **More info > Run anyway**.
+  Each release lists its files' checksums in `SHA256SUMS.txt`, so you can check what you downloaded.
   The app folder also holds `LICENSE.txt` and `THIRD_PARTY_LICENSES.txt`.
 - **Linux:** `TTSPython-<version>-linux-x86_64.tar.gz`. Extract it and run `TTSPython/install.sh` (installs for your
-  user only: app menu entry and a `ttspython` command; `uninstall.sh` removes it). It also needs
+  user only: app menu entry and a `ttspython` command; `uninstall.sh` removes it and asks about your data, and `uninstall.sh --delete-data` deletes it without asking). It also needs
   `espeak-ng`, `libportaudio2` and `libxcb-cursor0` from your distribution; the installer tells you if one is missing.
   Built on Ubuntu 22.04, so it runs on distributions from 2022 or newer.
 
-The first dictation downloads the Whisper model you picked (once) and, for English, French or Chinese, the live preview model (73 to 134 MB, once per language), a Piper voice downloads when you pick it, and the model for your own voice (762 MB) downloads when you ask for it, so the app needs internet for those.
+The first dictation downloads the Whisper model you picked (once; it stays in the shared Hugging Face cache until you delete it in **Settings > Listen > Downloaded models**) and, for English, French or Chinese, the live preview model (73 to 134 MB, once per language), a Piper voice downloads when you pick it, and the model for your own voice (762 MB) downloads when you ask for it, so the app needs internet for those.
 
 ### From source: Windows
 1. Install Python 3.10 or newer from [python.org](https://www.python.org/downloads/windows/) (tick **Add Python to PATH**).
@@ -181,14 +184,18 @@ With the ready-to-run app, use `TTSPython.exe --mini` (Windows) or `ttspython --
 2. Press **Start recording**, read the statement on screen out loud, then press **Stop recording**. The app checks that the recording says the statement, makes the voice, and tells you how quickly this computer can speak in it.
 3. Press **Hear it** to try it, or **Use this voice** to read with it.
 
-It is for your own voice only. The statement says that you agree to the copy and includes three code words that change on every try. There is no way to make a voice from a file, so a clip of someone else or an old recording will not work.
+It is for your own voice only. The statement says that you agree to the copy and includes three code words, spread from start to end, that change on every try. The recording has to say the statement and little else, and there is no way to make a voice from a file. This is a safeguard against misuse, not proof of who is speaking, so please only use it for your own voice.
 
-- **Privacy:** the recording, the voice and all the speech stay on your computer, in `%LOCALAPPDATA%\TTSPython\cloned-voices` (Windows) or `~/.local/share/ttspython/cloned-voices` (Linux). **Remove** deletes a voice and its recording. **Delete the voice model** frees the disk space and keeps your voices.
+The check uses your Whisper model, so if you have never dictated, that also downloads once when you stop recording (Small is about 480 MB). **Cancel** stops the whole thing and nothing is kept, as does closing the window.
+
+- **Privacy:** the recording, the voice and all the speech stay on your computer, in `%LOCALAPPDATA%\TTSPython\cloned-voices` (Windows) or `~/.local/share/ttspython/cloned-voices` (Linux). **Remove** deletes a voice and its recording. **Delete the voice model** frees the disk space and keeps your voices. If the model is gone, your voice stays selected and speaking with it says where to download it again.
 - **What it needs:** on the test PC (Intel i5-12600K) it makes speech 2.2 to 2.4 times as fast as it plays, using about 3 processor cores and 1.2 GB of memory, which is released 2 minutes after speech ends. On a slower or busy computer it may pause between sentences; the app measures this when it makes the voice; exporting to a file is not affected, it only takes longer.
 - **Waiting:** speech starts about 3 seconds after you press Play, or about 10 seconds after a pause while the model loads, because each sentence is made in full before it plays.
 - **Limits:** only tested in English, and not yet with a real microphone in a real room. Very short phrases sometimes gain a stray word (6 of 42 tries with one to three words, such as "Yes. All of them."), and digit strings such as phone numbers can come out wrong (555-0142 was heard as 535-042), so check anything important. Longer sentences had about 1.5% of words heard wrong.
 
 ## Keyboard shortcuts (in the window)
+
+The Enter on the numeric keypad works in every shortcut below that uses `Enter`.
 
 All can be changed in **Settings > Shortcuts**.
 
@@ -224,7 +231,7 @@ time TTSPython starts after a crash, logoff or shutdown. The speech queue is kep
 
 The first time TTSPython 5 starts, it imports your old `tts_settings.json` from the app folder (theme, shortcuts, clipboard, dictation and window size). The old file is left untouched.
 
-The Settings window has these pages: **Appearance** (theme gallery, Performance Mode), **Speech** (voice and Get more voices, speed and volume, which apply as you move them, output device with Refresh and Test, sentence highlight), **Listen** (microphone with a live level meter, Whisper model, downloaded models (Whisper and the live preview) with their size and a Delete button, language, **Instant live preview** on or off, memory options, how dictation reaches other apps), **Clipboard**, **Shortcuts** (in-window and global), **Mini mode** and **General** (tray behavior, settings file location). **Save** keeps the changes and closes; **Cancel** undoes them, previews included; closing with unsaved changes asks. The Output, Model and Mic labels in the main window open the matching page.
+The Settings window has these pages: **Appearance** (theme gallery, Performance Mode), **Speech** (voice and Get more voices, speed and volume, which apply as you move them, output device with Refresh, Test and Sound settings, sentence highlight), **Listen** (microphone with a live level meter, Whisper model, downloaded models (Whisper, the live preview and your own voice) with their size and a Delete button, **Unload now**, language, **Instant live preview** on or off, memory options, how dictation reaches other apps), **Clipboard**, **Shortcuts** (in-window and global, with **Enable global hotkeys**), **Mini mode** (with **Show the live waveform** and **Reset position**) and **General** (tray behavior, settings file location). **Save** keeps the changes and closes; **Cancel** undoes them, previews included; closing with unsaved changes asks. The Output, Model and Mic labels in the main window open the matching page.
 
 ## Troubleshooting
 
@@ -241,8 +248,9 @@ The Settings window has these pages: **Appearance** (theme gallery, Performance 
 ### The first dictation takes a while
 - The first time you use a Whisper model it is downloaded once (Small is about 480 MB). The download progress shows
   in the status bar, the Listen panel, and next to the mini bar; your recording is transcribed as soon as it finishes.
+  **Cancel** in the Listen panel, or `Esc` from the mini bar, stops it.
   Pick **Tiny** or **Base** in **Settings > Listen** for a smaller download.
-- The live preview model (73 MB) also downloads once, in the background; its progress shows in the status bar
+- The live preview model (73 MB, or 128 MB for French and 134 MB for Chinese) also downloads once, in the background; its progress shows in the status bar
   only, and until it is ready the captions come from Whisper alone (about every 1.5 s). Turn the preview off in
   **Settings > Listen > Instant live preview**.
 
@@ -294,6 +302,7 @@ Tests never touch your real settings: they use temporary files, and a guard fail
 ```bash
 build.bat        # Windows: dist/TTSPython/TTSPython.exe and dist/TTSPython-<version>-windows-x64.zip
 ./build.sh       # Linux:   dist/TTSPython/TTSPython and dist/TTSPython-<version>-linux-<arch>.tar.gz
+python packaging/build.py --installer   # Windows: also the installer (needs Inno Setup 6, or its ISCC in the ISCC environment variable)
 ```
 Each system builds its own app (PyInstaller cannot build for another OS). Build Linux on the oldest distribution
 you want to support. Pushing a `v*` tag runs `.github/workflows/build.yml`, which builds and smoke-tests both
@@ -308,7 +317,8 @@ and `TTSPYTHON_SELFTEST_VOICE=<voice id>` exports the test MP3 with that voice (
 ## License
 
 Released under the MIT License. See the [`LICENSE`](LICENSE) file. The ready-to-run app also includes Qt, Whisper's
-engine and other components under their own licenses, listed in its `THIRD_PARTY_LICENSES.txt`.
+engine and other components under their own licenses, listed in its `THIRD_PARTY_LICENSES.txt`. Whisper models (MIT) and
+the live preview models (Apache-2.0) are downloaded when needed and keep their own licenses.
 
 Piper voices are spoken by the official [Piper](https://github.com/rhasspy/piper) program (MIT, with espeak-ng under
 GPL-3.0), which TTSPython downloads and runs as a separate program; it is not part of TTSPython. Each voice has its

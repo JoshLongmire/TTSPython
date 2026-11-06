@@ -346,6 +346,7 @@ class LiveCaption(_NeverActivated, QWidget):
         self.setWindowTitle("TTSPython dictation")
         self._tokens = {}
         self._parts = ("", "", "")
+        self._wrap_cache = ("", ([], [], 0), None)
         self._status = ""
         self._pulse = False
         lay = QHBoxLayout(self)
@@ -411,24 +412,37 @@ class LiveCaption(_NeverActivated, QWidget):
     def lines(self):
         """[[(word, kind)]] for the lines on show: kind is "text", "preview" or "newest"."""
         settled, checked, preview = self._parts
-        words = ([(w, "text") for w in stt_preview.units(f"{settled} {checked}")]
-                 + [(w, "preview") for w in stt_preview.units(preview)])
-        if not words:
-            return []
-        words[-1] = (words[-1][0], "newest")
         fm = QFontMetrics(self.text.font())
         room, space = self._room(), fm.horizontalAdvance(" ")
-        lines, line, width = [], [], 0
-        for word, kind in words:
-            w = fm.horizontalAdvance(word)
-            gap = space if line and stt_preview.spaced(line[-1][0], word) else 0
-            if line and width + gap + w > room:
-                lines.append(line)
-                line, width, gap = [], 0, 0
-            width += gap + w
-            line.append((word, kind))
-        lines.append(line)
-        return lines[-self.LINES:]
+
+        def wrap(state, words, kind):
+            lines, line, width = state
+            for word in words:
+                w = fm.horizontalAdvance(word)
+                gap = space if line and stt_preview.spaced(line[-1][0], word) else 0
+                if line and width + gap + w > room:
+                    lines = [*lines[-self.LINES:], line]
+                    line, width, gap = [], 0, 0
+                width += gap + w
+                line = [*line, (word, kind)]
+            return lines, line, width
+
+        # Settled text only ever grows, so only what is new is wrapped: this runs at every caption
+        # update on the interface thread, and a 30-minute dictation took 32 ms when it was all wrapped.
+        key = (self.text.font().key(), room)
+        done, state, done_key = self._wrap_cache
+        grown = settled[len(done):]
+        continues = settled.startswith(done) and (not done or not grown or grown[0].isspace()
+                                                  or stt_preview.is_cjk(grown[0]) or stt_preview.is_cjk(done[-1]))
+        if done_key != key or not continues:
+            grown, state = settled, ([], [], 0)
+        state = wrap(state, stt_preview.units(grown), "text")
+        self._wrap_cache = (settled, state, key)
+        lines, line, _width = wrap(wrap(state, stt_preview.units(checked), "text"), stt_preview.units(preview), "preview")
+        if not line:
+            return []
+        line = [*line[:-1], (line[-1][0], "newest")]
+        return [*lines, line][-self.LINES:]
 
     def _render(self):
         from html import escape

@@ -185,6 +185,18 @@ class _PowerThrottlingState(ctypes.Structure):
     _fields_ = [("Version", wintypes.ULONG), ("ControlMask", wintypes.ULONG), ("StateMask", wintypes.ULONG)]
 
 
+def clipboard_is_private():
+    """Did the app that copied the clipboard ask others to leave it alone? Reads only that flag."""
+    try:
+        user32.RegisterClipboardFormatW.argtypes = [wintypes.LPCWSTR]
+        user32.RegisterClipboardFormatW.restype = wintypes.UINT
+        user32.IsClipboardFormatAvailable.argtypes = [wintypes.UINT]
+        fmt = user32.RegisterClipboardFormatW("ExcludeClipboardContentFromMonitorProcessing")
+        return bool(fmt and user32.IsClipboardFormatAvailable(fmt))
+    except Exception:
+        return False
+
+
 def disable_power_throttling():
     """Keep full CPU speed while in the background. Windows 11 otherwise runs background apps
     in efficiency mode, and dictating into another app made each Whisper pass 2.6x slower

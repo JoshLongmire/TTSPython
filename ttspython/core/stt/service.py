@@ -55,6 +55,7 @@ LIVE_PREVIEW_REST = 1.0  # with the instant preview, Whisper rests longer, but a
 PROMPT_TAIL = 200      # characters of settled text given to Whisper as context
 
 
+SEAM_CHARS = 300  # far more than the last few words the seam with the preview compares
 SILENT_PEAK = 1e-4  # a microphone blocked by privacy settings delivers exact zeros
 SILENT_MIC_MESSAGE = ("The microphone sent only silence. Check that it is not muted"
                       + (", and that Windows allows apps to use it (Settings > Privacy & security > Microphone)."
@@ -95,7 +96,9 @@ def _after_overlap(text, preview, longest=5, skip=2):
     ("week and we could" after "weekend we could"). If it only lines up without text's last
     word, that word was Whisper's guess at a half-heard word ("boards are so" while the
     preview says "boards are still in"), so the preview's version is shown instead."""
-    words = [w for w in preview_mod.units(text) if _plain(w)]  # Chinese has no spaces, and its commas stand alone
+    # Chinese has no spaces, and its commas stand alone. Only the end matters: this runs at every
+    # caption update, and a 30-minute dictation took 13 ms when the whole text was split.
+    words = [w for w in preview_mod.units(text[-SEAM_CHARS:]) if _plain(w)]
     for guessed in (False, True):
         tail = (words[:-1] if guessed else words)[-longest:]
         for start in range(min(skip, len(preview)) + 1):
@@ -105,6 +108,15 @@ def _after_overlap(text, preview, longest=5, skip=2):
                 if all(_same_word(a, b) for a, b in zip(tail[-k:], preview[start:start + k])):
                     return preview[start + k:], guessed
     return preview, False
+
+
+def _joined(pieces):
+    """Pieces of transcript as one text. Chinese and Japanese have no spaces between them."""
+    out = ""
+    for piece in pieces:
+        if piece:
+            out = f"{out} {piece}" if out and preview_mod.spaced(out, piece) else out + piece
+    return out
 
 
 def _without_last_word(text):
@@ -174,9 +186,21 @@ WHISPER_REPOS = {
     "tiny": "Systran/faster-whisper-tiny", "base": "Systran/faster-whisper-base",
     "small": "Systran/faster-whisper-small", "medium": "Systran/faster-whisper-medium",
     "large-v3": "Systran/faster-whisper-large-v3",
-    "large-v3-turbo": "mobiuslabsgmbh/faster-whisper-large-v3-turbo",
+    "large-v3-turbo": "dropbox-dash/faster-whisper-large-v3-turbo",
     "distil-large-v3": "Systran/faster-distil-whisper-large-v3",
 }
+# New downloads come from these commits, so a change in a repo cannot change what people get.
+WHISPER_REVISIONS = {
+    "tiny": "d90ca5fe260221311c53c58e660288d3deb8d356",
+    "base": "ebe41f70d5b6dfa9166e2c581c45c9c0cfc57b66",
+    "small": "536b0662742c02347bc0e980a01041f333bce120",
+    "medium": "08e178d48790749d25932bbc082711ddcfdfbc4f",
+    "large-v3": "edaa852ec7e145841d8ffdb056a99866b5f0a478",
+    "large-v3-turbo": "0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf",
+    "distil-large-v3": "c3058b475261292e64a0412df1d2681c06260fab",
+}
+# Downloaded by an older version under a repo's former name: still found, listed and deleted.
+FORMER_REPOS = {"mobiuslabsgmbh/faster-whisper-large-v3-turbo": "large-v3-turbo"}
 
 
 def downloaded_models(scan=None):
@@ -187,7 +211,7 @@ def downloaded_models(scan=None):
         info = scan()
     except Exception:
         return []
-    by_repo = {repo: name for name, repo in WHISPER_REPOS.items()}
+    by_repo = {**{repo: name for name, repo in WHISPER_REPOS.items()}, **FORMER_REPOS}
     return sorted((by_repo[r.repo_id], r.size_on_disk) for r in info.repos if r.repo_id in by_repo)
 
 
@@ -196,8 +220,8 @@ def delete_model(name, scan=None):
     if scan is None:
         from huggingface_hub import scan_cache_dir as scan
     info = scan()
-    repo = WHISPER_REPOS.get(name)
-    hashes = [rev.commit_hash for r in info.repos if r.repo_id == repo for rev in r.revisions]
+    repos = {WHISPER_REPOS.get(name), *(old for old, current in FORMER_REPOS.items() if current == name)}
+    hashes = [rev.commit_hash for r in info.repos if r.repo_id in repos for rev in r.revisions]
     if not hashes:
         return 0
     strategy = info.delete_revisions(*hashes)
@@ -255,19 +279,24 @@ def download_whisper(name, progress=None, cancel=None):
     """
     import time
 
-    if os.path.isdir(name):
+    known = name in WHISPER_REPOS
+    if not known and os.path.isdir(name):  # "small" always means the model, whatever folder we start in
         return name  # a model folder on disk
     from faster_whisper.utils import _MODELS
     from huggingface_hub import snapshot_download
 
-    repo = name if "/" in name else _MODELS.get(name, name)
-    try:
-        local = snapshot_download(repo, allow_patterns=WHISPER_FILES, local_files_only=True)
-        if model_complete(local):
-            return local
-        # The folder exists but a download was interrupted: the online call below resumes it.
-    except Exception:
-        pass  # not downloaded yet
+    repo = WHISPER_REPOS.get(name) or (name if "/" in name else _MODELS.get(name, name))
+    revision = WHISPER_REVISIONS.get(name)
+    # The pinned commit, then what an older version downloaded, which is never fetched again.
+    places = [(repo, revision), (repo, None), *((old, None) for old, current in FORMER_REPOS.items() if current == name)]
+    for where, commit in places:
+        try:
+            local = snapshot_download(where, revision=commit, allow_patterns=WHISPER_FILES, local_files_only=True)
+            if model_complete(local):
+                return local
+            # The folder exists but a download was interrupted: the online call below resumes it.
+        except Exception:
+            pass  # not downloaded yet
     bars, done = [], threading.Event()
     t0 = time.perf_counter()
 
@@ -286,9 +315,10 @@ def download_whisper(name, progress=None, cancel=None):
     def fetch():
         try:
             try:
-                outcome["path"] = snapshot_download(repo, allow_patterns=WHISPER_FILES, tqdm_class=_progress_class(bars, cancel))
+                outcome["path"] = snapshot_download(repo, revision=revision, allow_patterns=WHISPER_FILES,
+                                                    tqdm_class=_progress_class(bars, cancel))
             except TypeError:  # an older huggingface_hub without tqdm_class
-                outcome["path"] = snapshot_download(repo, allow_patterns=WHISPER_FILES)
+                outcome["path"] = snapshot_download(repo, revision=revision, allow_patterns=WHISPER_FILES)
         except BaseException as exc:
             outcome["error"] = exc
 
@@ -531,11 +561,12 @@ class SttService:
     def transcribe_once(self, audio, language="en"):
         """What Whisper hears in this float32 audio at 16 kHz. Blocks, loading the model first if needed.
         For checking a recording, not dictation: nothing is typed and no event is sent."""
+        self.cache.cancel_download.clear()  # a dictation's cancelled download must not stop this one
         model = self._get_model()
         segments, _ = model.transcribe(audio, language=language, beam_size=5, vad_filter=True,
                                        condition_on_previous_text=False)
-        text = " ".join((seg.text or "").strip() for seg in segments).strip()
-        self._schedule_unload()
+        text = _joined((seg.text or "").strip() for seg in segments)
+        self.went_idle()
         return text
 
     def _get_model(self):
@@ -739,10 +770,9 @@ class SttService:
             if not cut and seconds > MAX_TAIL and len(segments) > 1:  # no pause: cut at the last segment
                 cut, cut_sample = len(segments) - 1, int(segments[-2][1] * rate)
         if cut:
-            settled = " ".join(t for _s, _e, t in segments[:cut] if t)
-            self._settled_text = f"{self._settled_text} {settled}".strip()
+            self._settled_text = _joined([self._settled_text, *(t for _s, _e, t in segments[:cut])])
             self._settled_samples += cut_sample
-        return " ".join(t for _s, _e, t in segments[cut:] if t)
+        return _joined(t for _s, _e, t in segments[cut:])
 
     def _live_loop(self, session):
         """Runs on the worker while recording: transcribe the new audio, report it, rest."""
@@ -771,7 +801,7 @@ class SttService:
             # Kept even if dictation stopped meanwhile: stop can use it instead of a new pass.
             # Not if a newer dictation began: this text is not part of that one.
             if self._recording == session:
-                self._last_pass = (base, base + audio.size, " ".join(t for _s, _e, t in segments if t))
+                self._last_pass = (base, base + audio.size, _joined(t for _s, _e, t in segments))
             if self._session != session:
                 return
             with self._caption_lock:
@@ -806,8 +836,8 @@ class SttService:
                 tail_audio = audio[self._settled_samples:]
                 tail = ""
                 if tail_audio.size >= self.recorder.sample_rate * 0.2:
-                    tail = " ".join(t for _s, _e, t in self._whisper(self._get_model(), tail_audio) if t)
-            text = normalize_transcript_text(f"{self._settled_text} {tail}".strip())
+                    tail = _joined(t for _s, _e, t in self._whisper(self._get_model(), tail_audio))
+            text = normalize_transcript_text(_joined([self._settled_text, tail]))
             if self._cancelled:
                 return
             if text:

@@ -73,7 +73,9 @@ _MEASURE_MIN_WORDS = 5
 _NATIVE_RANGE = (110, 280)
 
 MIN_SECONDS, MAX_SECONDS = 6, 40
+_LIMIT_MARGIN_SECONDS = 2  # the window stops by itself at MAX_SECONDS, and its timer runs a little behind
 _CONSENT_MATCH = 0.75
+_CONSENT_MOST_EXTRA = 1.25  # words heard, against words in the statement
 _SILENT_PEAK = 0.01
 _CLIPPED_SHARE = 0.01
 _REFERENCE_PEAK = 0.7
@@ -108,6 +110,11 @@ def install_model(progress=None, cancel=None, opener=None):
     folder = model_dir()
     os.makedirs(folder, exist_ok=True)
     kwargs = {"opener": opener} if opener else {}
+    missing = sum(size for _repo, name, size, _sha in MODEL_FILES
+                  if not (os.path.isfile(os.path.join(folder, name)) and os.path.getsize(os.path.join(folder, name)) == size))
+    free = shutil.disk_usage(folder).free
+    if free < missing:
+        raise OSError(f"The voice model needs {missing / 1e6:.0f} MB of free disk space, and only {free / 1e6:.0f} MB is free.")
     done = 0
     for repo, name, size, sha in MODEL_FILES:
         path = os.path.join(folder, name)
@@ -124,10 +131,13 @@ def install_model(progress=None, cancel=None, opener=None):
 
 def remove_model():
     """Delete the model (the voices stay, ready for when it is downloaded again). Returns bytes freed."""
-    release_engine()
-    freed = _folder_size(model_dir())
-    shutil.rmtree(model_dir(), ignore_errors=True)
-    return freed - _folder_size(model_dir())
+    with _engine_lock:  # never under a sentence being spoken, and nothing can load it again meanwhile
+        _drop_engine()
+        freed = _folder_size(model_dir())
+        shutil.rmtree(model_dir(), ignore_errors=True)
+        if os.path.exists(model_dir()):
+            raise OSError("Could not delete the voice model. Close what is using it and try again.")
+    return freed
 
 
 def model_size():
@@ -156,13 +166,15 @@ class Consent:
     code_words: tuple
 
 
-def new_consent(chooser=random.SystemRandom()):
+def new_consent(chooser=None):
     """The statement to read aloud. Fresh code words each time, so an old recording of someone
-    cannot be played to the microphone instead."""
-    words = tuple(chooser.sample(CODE_WORDS, 3))
-    return Consent("This is my own voice, and I am reading these words myself. I agree to let this computer make a "
-                   "copy of my voice, for my own use. It can say anything that I give it to read. "
-                   f"My code words are {words[0]}, {words[1]} and {words[2]}.", words)
+    cannot be played to the microphone instead. They are spread from start to end, so a clip of
+    someone else cannot fill the part of the recording the voice is made from."""
+    first, second, last = (chooser or random.SystemRandom()).sample(CODE_WORDS, 3)
+    return Consent(f"My first code word is {first}. This is my own voice, and I am reading these words myself. "
+                   f"My second code word is {second}. I agree to let this computer make a copy of my voice, for my "
+                   f"own use. It can say anything that I give it to read. My last code word is {last}.",
+                   (first, second, last))
 
 
 def _words(text):
@@ -177,7 +189,10 @@ def check_consent(consent, heard):
         return "No words were heard. Read the statement out loud and try again."
     if missing:
         return "The code words were not heard clearly. Read the whole statement again, code words included."
-    if difflib.SequenceMatcher(None, _words(consent.text), said, autojunk=False).ratio() < _CONSENT_MATCH:
+    wanted = _words(consent.text)
+    if len(said) > len(wanted) * _CONSENT_MOST_EXTRA:
+        return "That had too much other speech in it. Read only the statement, with nobody else talking."
+    if difflib.SequenceMatcher(None, wanted, said, autojunk=False).ratio() < _CONSENT_MATCH:
         return "That did not match the statement closely enough. Read it again, just as it is written."
     return ""
 
@@ -187,7 +202,7 @@ def check_recording(audio, rate):
     seconds = audio.size / rate if rate else 0
     if seconds < MIN_SECONDS:
         return "That was too short. Read the whole statement."
-    if seconds > MAX_SECONDS:
+    if seconds > MAX_SECONDS + _LIMIT_MARGIN_SECONDS:
         return "That was too long. Press Stop as soon as you finish reading."
     peak = float(np.abs(audio).max())
     if peak < _SILENT_PEAK:
@@ -232,7 +247,8 @@ def saved_voices():
         voice_id = PREFIX + name
         try:
             info = voice_info(voice_id)
-            if os.path.isfile(os.path.join(voice_folder(voice_id), "codes.npy")):
+            folder = voice_folder(voice_id)
+            if isinstance(info, dict) and all(os.path.isfile(os.path.join(folder, n)) for n in ("codes.npy", "consent.wav")):
                 out.append((voice_id, info))
         except (OSError, ValueError, KeyError):
             continue  # a folder this is not, or a voice left half written
@@ -240,10 +256,10 @@ def saved_voices():
 
 
 def installed_voices():
-    """The voices that can speak right now."""
-    if not model_installed():
-        return []
-    return [Voice(id=voice_id, name=f"{info.get('name') or 'My voice'} - your voice", language="en")
+    """Every saved voice, even with the model deleted: a voice leaving the list would change the
+    voice saved in Settings for good. Speaking with one then says where to get the model."""
+    note = "" if model_installed() else " (model not downloaded)"
+    return [Voice(id=voice_id, name=f"{info.get('name') or 'My voice'} - your voice{note}", language="en")
             for voice_id, info in saved_voices()]
 
 
@@ -254,11 +270,22 @@ def build_voice(name, consent, audio, rate, heard, engine=None):
     if problem:
         raise ValueError(problem)
     clean = clean_reference(audio, rate)
-    codes = (engine or shared_engine()).encode(clean, rate)
+    if engine is None:
+        with _engine_lock:
+            try:
+                codes = shared_engine().encode(clean, rate)
+            finally:
+                _release_when_idle()
+    else:
+        codes = engine.encode(clean, rate)
+    os.makedirs(voices_dir(), mode=0o700, exist_ok=True)  # recordings of someone's voice: this user only
+    for name in os.listdir(voices_dir()):
+        if name.endswith(".new"):  # left by a crash in the middle of saving: it holds a recording
+            shutil.rmtree(os.path.join(voices_dir(), name), ignore_errors=True)
     key = uuid.uuid4().hex[:12]
     folder = os.path.join(voices_dir(), key)
     staging = folder + ".new"
-    os.makedirs(staging, exist_ok=True)
+    os.makedirs(staging, mode=0o700, exist_ok=True)
     try:
         np.save(os.path.join(staging, "codes.npy"), codes.astype(np.int16), allow_pickle=False)
         with wave.open(os.path.join(staging, "consent.wav"), "wb") as w:
@@ -291,7 +318,10 @@ def speed_message(speed):
 
 
 def remove_voice(voice_id):
-    shutil.rmtree(voice_folder(voice_id), ignore_errors=True)
+    """Delete a voice and its recording. Returns False if something could not be deleted."""
+    folder = voice_folder(voice_id)
+    shutil.rmtree(folder, ignore_errors=True)
+    return not os.path.exists(folder)
 
 
 def load_codes(voice_id):
@@ -490,12 +520,15 @@ class Engine:
 
 
 _engine = None
-_engine_lock = threading.RLock()
+_engine_lock = threading.RLock()  # held for each sentence: speech and export take turns on the one model
 _idle_timer = None
+_idle_turn = 0
+_loader = None
+_load_error = None
 
 
 def shared_engine():
-    """One model for the whole app: speech and export take turns on it (see CloneRenderer)."""
+    """The one model of the whole app, loaded if needed."""
     global _engine
     with _engine_lock:
         if _engine is None:
@@ -507,37 +540,100 @@ def engine_loaded():
     return _engine is not None
 
 
+def _drop_engine():
+    global _engine
+    _cancel_idle_timer()
+    _engine = None
+
+
 def release_engine():
-    """Let the model go. Waits for a render in progress, if any."""
-    global _engine, _idle_timer
+    """Let the model go. Waits for a sentence being made, if any."""
     with _engine_lock:
-        if _idle_timer is not None:
-            _idle_timer.cancel()
-            _idle_timer = None
-        _engine = None
+        _drop_engine()
+
+
+def _cancel_idle_timer():
+    global _idle_timer, _idle_turn
+    _idle_turn += 1
+    if _idle_timer is not None:
+        _idle_timer.cancel()
+        _idle_timer = None
+
+
+def _release_after_idle(turn):
+    with _engine_lock:
+        if turn == _idle_turn:  # no sentence started while this waited for the lock
+            _drop_engine()
 
 
 def _release_when_idle():
     global _idle_timer
-    if _idle_timer is not None:
-        _idle_timer.cancel()
-    _idle_timer = threading.Timer(IDLE_SECONDS, release_engine)
+    _cancel_idle_timer()
+    _idle_timer = threading.Timer(IDLE_SECONDS, _release_after_idle, (_idle_turn,))
     _idle_timer.daemon = True
     _idle_timer.start()
 
 
-def speed_check(voice_id, text=SPEED_CHECK_TEXT):
+def _load_in_background():
+    global _load_error
+    try:
+        with _engine_lock:
+            shared_engine()
+            _release_when_idle()
+    except Exception as exc:
+        _load_error = exc
+
+
+def _load_engine(cancel):
+    """Load the model on its own thread (5 to 10 seconds), so that Stop still works meanwhile.
+    A load left behind by Stop finishes, and is ready for the next sentence or let go when idle."""
+    global _loader, _load_error
+    if _engine is not None:
+        return
+    if _loader is None or not _loader.is_alive():
+        _load_error = None
+        _loader = threading.Thread(target=_load_in_background, name="clone-load", daemon=True)
+        _loader.start()
+    loader = _loader
+    while loader.is_alive():
+        loader.join(0.03)
+        if cancel.is_set():
+            raise Cancelled()
+    error, _load_error = _load_error, None
+    if error is not None:
+        raise error
+
+
+def wait_for_load(timeout):
+    if _loader is not None:
+        _loader.join(timeout)
+
+
+def _take_turn(cancel):
+    """Wait for the model, for as long as Stop is not pressed."""
+    while not _engine_lock.acquire(timeout=0.03):
+        if cancel.is_set():
+            raise Cancelled()
+
+
+def speed_check(voice_id, cancel=None, text=SPEED_CHECK_TEXT):
     """How many seconds of speech this computer makes per second, in this voice."""
+    cancel = cancel or threading.Event()
     codes = load_codes(voice_id)
-    with _engine_lock:
+    _load_engine(cancel)
+    _take_turn(cancel)
+    try:
+        _cancel_idle_timer()
         engine = shared_engine()
         # The first sentence after loading is slow while the model is read from disk: that is a
         # one-time wait, not this computer's speed (0.6x on the test PC, against 2.3x after it).
-        engine.speak(codes, "One moment.", threading.Event())
+        engine.speak(codes, "One moment.", cancel)
         start = time.perf_counter()
-        audio = engine.speak(codes, text, threading.Event())
+        audio = engine.speak(codes, text, cancel)
         elapsed = time.perf_counter() - start
+    finally:
         _release_when_idle()
+        _engine_lock.release()
     return (audio.size / engine.rate) / elapsed if elapsed > 0 else 0.0
 
 
@@ -548,8 +644,8 @@ class CloneRenderer:
     name = "clone"
     sample_rate = 48000
 
-    def __init__(self, engine_factory=shared_engine):
-        self._engine_factory = engine_factory
+    def __init__(self, engine_factory=None):
+        self._engine_factory = engine_factory  # for tests: the model is loaded and shared otherwise
         self._codes = {}
         self._native = {}  # voice id -> words per minute of its last long enough sentence
 
@@ -572,10 +668,16 @@ class CloneRenderer:
                 codes = self._codes[voice_id] = load_codes(voice_id)
         except (OSError, ValueError) as exc:
             raise RuntimeError("This voice is gone. Pick another voice.") from exc
-        with _engine_lock:
-            engine = self._engine_factory()
+        if self._engine_factory is None:
+            _load_engine(cancel)
+        _take_turn(cancel)
+        try:
+            _cancel_idle_timer()  # it must not let the model go in the middle of a long sentence
+            engine = self._engine_factory() if self._engine_factory else shared_engine()
             audio = engine.speak(codes, text, cancel)
+        finally:
             _release_when_idle()
+            _engine_lock.release()
         words = len(text.split())
         seconds = audio.size / engine.rate
         if words >= _MEASURE_MIN_WORDS and seconds > 0:

@@ -18,11 +18,12 @@ from ..core.settings import RECENT_MAX, speed_percent, write_json_atomic
 from ..core.stt import preview as stt_preview
 from ..core.stt import service as stt_models
 from ..core.stt.service import SttService, SttState
+from ..core.tts import clone as voice_clone
 from ..core.tts.controller import Source, SpeechController, State
 from ..core.tts.export import AudioExporter, mp3_available
 from ..core.tts.render import pick_default_voice
 from ..platform.hotkeys import GlobalHotkeys, availability as hotkey_availability
-from ..platform.inject import TextInjector
+from ..platform.inject import TextInjector, is_private_clipboard
 from ..platform.selection import SelectionGrabber
 from . import icons
 from .bridge import ExportBridge, SpeechBridge, SttBridge
@@ -53,6 +54,8 @@ def _saved_text(editor):
 
 
 class AppController(QObject):
+    VOICE_MODEL_LABEL = "your own voice"  # its row in Settings > Listen > Downloaded models
+
     devices_resolved = Signal(object)
 
     def __init__(self, app: QApplication, settings_store, services=None):
@@ -513,6 +516,7 @@ class AppController(QObject):
         if state is State.STARTING and self._your_voice_is_loading():
             self._toast("Loading your voice. The first sentence takes about 10 seconds.", 5000)
         if state is State.IDLE:
+            self._end_voice_try()
             self.editor.stop_tracking()
             self.window.transport.reset_progress("Ready")
             self.window.queue_panel.set_playing(None)
@@ -526,9 +530,7 @@ class AppController(QObject):
         self._apply_mode_enabled()
 
     def _your_voice_is_loading(self):
-        from ..core.tts import clone  # the model itself loads only when it speaks
-
-        return (self.speech.voice_id or "").startswith(clone.PREFIX) and not clone.engine_loaded()
+        return (self.speech.voice_id or "").startswith(voice_clone.PREFIX) and not voice_clone.engine_loaded()
 
     def _on_queue_finished(self, stopped):
         self.window.queue_panel.set_playing(None)
@@ -571,7 +573,7 @@ class AppController(QObject):
         self._status(f"{len(voices)} voice{'s' if len(voices) != 1 else ''} ready")
         if self._voice_browser is not None:
             self._voice_browser.set_current(self.speech.voice_id)
-        if self._clone_dialog is not None and not self._hearing_clone:
+        if self._clone_dialog is not None:
             self._clone_dialog.set_current(self.speech.voice_id)
 
     def on_refresh_voices(self):
@@ -605,9 +607,13 @@ class AppController(QObject):
         def busy():
             return "" if self.stt.state is SttState.IDLE else "Finish dictating first: it is using the microphone."
 
+        def speaking():
+            return "Stop speech and any export first." if self.speech.busy or self.exporter.running else ""
+
         # Not a child of Settings: closing that would destroy this window in the middle of a download.
-        dlg = CloneDialog(self.stt.transcribe_once, self.settings["tts_voice_id"], self.window,
-                          input_device=self.stt.input_device, busy_reason=busy)
+        dlg = CloneDialog(self.stt.transcribe_once, lambda: self.settings["tts_voice_id"], self.window,
+                          input_device=lambda: self.stt.input_device, busy_reason=busy, busy_speaking=speaking,
+                          stop_transcribe=self.stt.cache.cancel_download.set)
         dlg.setAttribute(Qt.WA_DeleteOnClose)
         dlg.voices_changed.connect(self.speech.refresh_voices)
         dlg.use_voice.connect(self._use_clone)
@@ -622,18 +628,28 @@ class AppController(QObject):
         self._use_voice_from_browser(vid)
 
     def _hear_clone(self, vid):
-        """Just a try: the voice in Settings stays as it is until "Use this voice"."""
+        """Just a try, of one sentence: the voice in Settings stays as it is until "Use this voice"."""
         self.speech.stop()
         self.speech.set_voice(vid)
         self._hearing_clone = True
-        self.speech.speak("This is how I sound when I read for you.", Source.TEST)
+        if not self.speech.speak("This is how I sound when I read for you.", Source.TEST):
+            self._end_voice_try()
+            self._toast("Still stopping the previous speech. Try again in a moment.")
+
+    def _end_voice_try(self):
+        if self._hearing_clone:
+            self._hearing_clone = False
+            self.speech.set_voice(self.settings["tts_voice_id"])
 
     def _clone_dialog_closed(self):
         self._clone_dialog = None
         if self._hearing_clone:
-            self._hearing_clone = False
             self.speech.stop()
-            self.speech.set_voice(self.settings["tts_voice_id"])
+            self._end_voice_try()
+
+    def _clone_dialog_quit(self):
+        if self._clone_dialog is not None:
+            self._clone_dialog.abandon()
 
     def _use_voice_from_browser(self, vid):
         self._set_voice(vid)
@@ -712,7 +728,8 @@ class AppController(QObject):
     def rescan_devices(self):
         """Pick up devices plugged in after start. Skipped while audio is in use (an open
         stream must not outlive PortAudio). Returns True if the list was refreshed."""
-        if self.speech.busy or self.stt.state is not SttState.IDLE or self.exporter.running:
+        recording_voice = self._clone_dialog is not None and self._clone_dialog.recording
+        if self.speech.busy or self.stt.state is not SttState.IDLE or self.exporter.running or recording_voice:
             return False
         if self._device_preset is None:
             self.speech.player.close()  # idle: it reopens on the next Speak
@@ -830,7 +847,7 @@ class AppController(QObject):
     def _load_queue(self):
         """Put back the queue from the last session."""
         try:
-            with open(self._queue_path(), "r", encoding="utf-8") as f:
+            with open(self._queue_path(), encoding="utf-8") as f:
                 items = json.load(f).get("items", [])
         except (OSError, ValueError, AttributeError):
             return
@@ -920,7 +937,10 @@ class AppController(QObject):
     def _on_clipboard(self):
         if not self.settings["clipboard_monitor"]:
             return
-        text = QGuiApplication.clipboard().text()
+        clipboard = QGuiApplication.clipboard()
+        if is_private_clipboard(clipboard.mimeData()) or self._clipboard_marked_private():
+            return  # a password manager asked apps to leave this alone: it is never read out or kept
+        text = clipboard.text()
         action, label = self.router.decide(text, busy=self.speech.busy, action=self.settings["clipboard_action"],
                                            auto_queue=self.settings["clipboard_auto_queue"])
         if action is Action.SPEAK:
@@ -933,6 +953,14 @@ class AppController(QObject):
             self._status(f"Clipboard text queued ({len(self.queue)} items)")
         elif label == "busy":
             self._status("Clipboard ignored while speaking (turn on Auto-Queue to queue it)")
+
+    @staticmethod
+    def _clipboard_marked_private():
+        if not plat.IS_WINDOWS:
+            return False
+        from ..platform import winapi
+
+        return winapi.clipboard_is_private()
 
     # ======================================================================
     # Dictation
@@ -1040,6 +1068,8 @@ class AppController(QObject):
 
     def _on_model_status(self, text):
         self._status(text)
+        if self._clone_dialog is not None:
+            self._clone_dialog.model_status(text)
         self.window.listen_panel.cancel.setVisible(bool(_progress_key(text)))
         if self.stt.state is not SttState.RECORDING:
             # A model message while it lasts ("Loading small model..."), then back to the state.
@@ -1537,11 +1567,25 @@ class AppController(QObject):
         models = stt_models.downloaded_models()
         if stt_preview.any_installed():
             models.append((PREVIEW_MODEL_LABEL, stt_preview.size_on_disk()))
+        if voice_clone.model_installed():
+            models.append((self.VOICE_MODEL_LABEL, voice_clone.model_size()))
         return models
 
     def delete_model(self, name):
         """Delete a downloaded Whisper model (or the live preview's). Returns a message if it
         could not be deleted."""
+        if name == self.VOICE_MODEL_LABEL:
+            if self.settings["tts_voice_id"].startswith(voice_clone.PREFIX) or self.speech.voice_id.startswith(voice_clone.PREFIX):
+                return "One of your voices is in use. Pick another voice first, then delete the model."
+            if self.speech.busy or self.exporter.running:
+                return "Stop speech and any export first, then delete the model."
+            try:
+                freed = voice_clone.remove_model()
+            except OSError as exc:
+                return str(exc)
+            self.speech.refresh_voices()
+            self._status(f"Deleted the voice model ({freed / 1e6:,.0f} MB freed). Your voices are kept.")
+            return ""
         if self.stt.state is not SttState.IDLE:
             return "Finish dictating first, then delete the model."
         if name == PREVIEW_MODEL_LABEL:
@@ -1755,7 +1799,7 @@ class AppController(QObject):
         """Put back text kept at the end of the last session. Returns True if any was restored."""
         path = self._recovery_path()
         try:
-            with open(path, "r", encoding="utf-8") as f:
+            with open(path, encoding="utf-8") as f:
                 data = json.load(f)
         except (OSError, ValueError):
             return False
@@ -1780,6 +1824,7 @@ class AppController(QObject):
         if self._quitting:
             return
         self._quitting = True
+        self._clone_dialog_quit()
         if keep_draft:
             self._write_recovery()
         else:

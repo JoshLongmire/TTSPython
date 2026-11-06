@@ -20,8 +20,13 @@ def test_it_installs_without_administrator_rights():
 
 
 def test_it_never_touches_settings_voices_or_models():
+    # Only the one procedure that runs when the person says yes while uninstalling may name them.
+    start = SCRIPT.index("procedure DeleteUserData;")
+    outside = SCRIPT[:start] + SCRIPT[SCRIPT.index("end;", SCRIPT.index("#endif", start)):]
     for folder in ("{userappdata}", "{localappdata}", "{commonappdata}", "{userdocs}"):
-        assert folder not in SCRIPT
+        assert folder not in outside
+    assert "DeleteUserData" not in SCRIPT[:start]
+    assert "{commonappdata}" not in SCRIPT and "{userdocs}" not in SCRIPT
     deleted = re.findall(r'^Type: \w+; Name: "([^"]+)"', SCRIPT, re.M)
     assert deleted == ["{app}\\_internal"]
 
@@ -33,7 +38,7 @@ def test_the_version_comes_from_the_app():
 
 def test_a_running_copy_is_asked_to_quit_before_files_change():
     assert "'--quit'" in SCRIPT
-    assert "function PrepareToInstall" in SCRIPT and "usUninstall" in SCRIPT
+    assert "function PrepareToInstall" in SCRIPT and "function InitializeUninstall" in SCRIPT
     assert len(re.findall(r"^ +QuitRunningApp;", SCRIPT, re.M)) == 2  # once for upgrades, once for uninstalling
 
 

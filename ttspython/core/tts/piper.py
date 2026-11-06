@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -25,6 +26,7 @@ from .render import Cancelled, Voice
 from .wavparse import parse_wav
 
 PREFIX = "piper:"
+VOICE_KEY = re.compile(r"[\w.+-]+")
 RELEASE = "2023.11.14-2"
 RELEASE_URL = f"https://github.com/rhasspy/piper/releases/download/{RELEASE}/"
 # The official builds, pinned by checksum.
@@ -349,7 +351,8 @@ class PiperRenderer:
         if cancel.is_set():
             raise Cancelled()
         key = voice_id[len(PREFIX):]
-        if not program_installed() or not os.path.isfile(model_path(key)):
+        # The id comes from the settings file: it must not be able to name a file elsewhere.
+        if not VOICE_KEY.fullmatch(key) or not program_installed() or not os.path.isfile(model_path(key)):
             raise RuntimeError("This Piper voice is not downloaded. Open Settings > Speech > Get more voices.")
         length_scale = round((NORMAL_WPM / float(self.native_wpm(wpm))) ** LENGTH_POWER, 3)
         with self._lock:

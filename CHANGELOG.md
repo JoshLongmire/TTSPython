@@ -1,6 +1,18 @@
 # Changelog - TTSPython
 
 ## Unreleased
+- Fixed a crash at startup on a busy PC. Python's way of asking Windows for its version could bring down the whole app:
+  9 of 180 starts crashed on a loaded test PC before the fix, and 0 of 180 after it.
+- Privacy: dictated text copied instead of pasted now also stays out of Windows clipboard history and cloud sync, and the
+  clipboard watcher no longer reads out or queues what a password manager copies. On Linux, saved files and voice
+  recordings can only be read by you.
+- Uninstalling now asks whether to delete your settings, unsaved text, voices and recordings (No is the default), and
+  the installer stops rather than replacing a running copy that would not close.
+- Whisper models now download from pinned versions, and "Large v3 Turbo" from its new home. Models you already have are kept.
+  Releases are built with pinned tools, with a checksum list, `SHA256SUMS.txt`.
+- Long dictations stay smooth: the live caption no longer slows down as the text grows. At 30 minutes, the work for each update took
+  45 ms before and now takes 0.2 ms.
+- Chinese and Japanese dictation no longer gets stray spaces between pieces of text.
 - New: your own voice. In **Settings > Speech > Get more voices > Make my voice**, read a short statement out loud and
   the app makes a copy of your voice, on your computer. It only works from you reading the statement, with fresh code
   words each time, so a voice cannot be made from a file or an old recording. The voice model is an optional 762 MB
@@ -8,7 +20,8 @@
   cores and 1.2 GB of memory, which is released 2 minutes after speech ends. The first sentence takes about 3 seconds, or
   about 10 after a pause while the model loads. Slower PCs may pause between sentences, and the app measures this and tells you.
   A speaker recognition model scored three copies 0.80 to 0.90 against the real speaker (1 is identical) and at most
-  0.64 against other people. Only tested in English.
+  0.64 against other people. Only tested in English. Very short phrases sometimes gain a stray word, and phone numbers
+  can come out wrong.
 - Instant live captions now also work in French and Chinese, and the Chinese model follows English words mixed in.
   On real speech clips, words appeared 0.35 to 0.53 s (French) and 0.22 to 0.29 s (Chinese) after they were said.
 - Live captions show Chinese without spaces between characters, and wrap it properly.

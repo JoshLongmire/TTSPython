@@ -319,7 +319,7 @@ def test_download_progress_counts_bytes(monkeypatch):
 
     calls = []
 
-    def fake_snapshot(repo, allow_patterns=None, local_files_only=False, tqdm_class=None):
+    def fake_snapshot(repo, revision=None, allow_patterns=None, local_files_only=False, tqdm_class=None):
         calls.append((repo, local_files_only))
         if local_files_only:
             raise FileNotFoundError("not cached")
@@ -331,7 +331,9 @@ def test_download_progress_counts_bytes(monkeypatch):
     monkeypatch.setattr(huggingface_hub, "snapshot_download", fake_snapshot)
     seen = []
     assert service.download_whisper("small", lambda *a: seen.append(a)) == "C:/hub/small"
-    assert calls == [("Systran/faster-whisper-small", True), ("Systran/faster-whisper-small", False)]
+    # Looks for the pinned commit, then for an older version's download, and only then goes online.
+    assert calls == [("Systran/faster-whisper-small", True), ("Systran/faster-whisper-small", True),
+                     ("Systran/faster-whisper-small", False)]
     assert seen and seen[0][:2] == (242, 484)
 
 

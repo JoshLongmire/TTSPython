@@ -9,6 +9,7 @@ import types
 
 import numpy as np
 import pytest
+from PySide6.QtWidgets import QMessageBox
 
 from fakes import FakeRenderer
 from ttspython.core.download import ChecksumError, DownloadCancelled
@@ -88,7 +89,7 @@ def test_a_close_reading_passes():
     ("This is my own voice. My code words are river, candle and apple.", "code words"),  # an old statement
     ("river candle orange", "did not match"),  # only the code words
     ("Hello there, my friend was reading out river, candle and orange from a very long list of other things today.",
-     "did not match"),  # someone else's speech
+     "too much"),  # someone else's speech
 ])
 def test_a_wrong_reading_is_refused(heard, wanted):
     assert wanted in clone.check_consent(CONSENT, heard)
@@ -200,8 +201,8 @@ def test_deleting_the_model_keeps_the_voices(small_model):
     vid = voice()
     assert clone.remove_model() == clone.MODEL_BYTES
     assert not clone.model_installed()
-    assert clone.installed_voices() == []  # it cannot speak...
-    assert [v for v, _i in clone.saved_voices()] == [vid]  # ...but it is still there
+    assert [v.id for v in clone.installed_voices()] == [vid]  # still the voice in Settings
+    assert "model not downloaded" in clone.installed_voices()[0].name
 
 
 # --- the saved voices ---------------------------------------------------------------------------
@@ -534,7 +535,7 @@ def window(qtbot, heard=None, recorder=None, **kwargs):
         return heard(dlg._consent) if heard else dlg._consent.text
 
     dlg = CloneDialog(transcribe, recorder=recorder or FakeRecorder(), builder=build,
-                      speed_check=lambda _vid: 2.3, **kwargs)
+                      speed_check=lambda _vid, _cancel=None: 2.3, **kwargs)
     qtbot.addWidget(dlg)
     dlg.consents = consents
     return dlg
@@ -637,7 +638,7 @@ def test_a_slow_computer_is_told(model, qtbot):
     from ttspython.ui.clone_dialog import CloneDialog
 
     engine = FakeEngine()
-    dlg = CloneDialog(lambda _a: dlg._consent.text, recorder=FakeRecorder(), speed_check=lambda _v: 0.7,
+    dlg = CloneDialog(lambda _a: dlg._consent.text, recorder=FakeRecorder(), speed_check=lambda _v, _c=None: 0.7,
                       builder=lambda n, c, a, r, h: clone.build_voice(n, c, a, r, h, engine))
     qtbot.addWidget(dlg)
     record(qtbot, dlg)
@@ -700,7 +701,8 @@ def test_the_model_cannot_be_deleted_while_one_of_the_voices_is_in_use(model, qt
     assert clone.model_installed() and "in use" in dlg.status.text()
 
 
-def test_using_hearing_and_removing_a_voice(model, qtbot):
+def test_using_hearing_and_removing_a_voice(model, qtbot, monkeypatch):
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.Yes)
     vid = voice()
     dlg = window(qtbot)
     with qtbot.waitSignal(dlg.hear_voice, timeout=1000) as heard:

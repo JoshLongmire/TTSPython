@@ -25,7 +25,7 @@ def query_devices(sd=None):
     """All devices as DeviceInfo. Returns [] if sounddevice is unavailable."""
     try:
         if sd is None:
-            import sounddevice as sd  # noqa: PLW0621
+            import sounddevice as sd
         devices = sd.query_devices()
         hostapis = sd.query_hostapis()
     except Exception:
@@ -56,7 +56,7 @@ def rescan(sd=None):
     """
     try:
         if sd is None:
-            import sounddevice as sd  # noqa: PLW0621
+            import sounddevice as sd
         sd._terminate()
         sd._initialize()
         return True
@@ -67,7 +67,7 @@ def rescan(sd=None):
 def default_hostapi_name(sd=None):
     try:
         if sd is None:
-            import sounddevice as sd  # noqa: PLW0621
+            import sounddevice as sd
         return sd.query_hostapis(sd.default.hostapi)["name"]
     except Exception:
         return ""

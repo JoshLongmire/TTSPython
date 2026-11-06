@@ -15,6 +15,8 @@
 
 ## In-window shortcuts
 
+The numeric keypad's Enter works in every shortcut that uses `Enter`.
+
 | Action | Default |
 |--------|---------|
 | Speak all | `Ctrl+Enter` |
@@ -39,9 +41,10 @@
 | Action | Default |
 |--------|---------|
 | Start or stop dictation | `Ctrl+Alt+D` |
-| Speak highlighted text or clipboard (again to stop) | `Ctrl+Alt+S` |
+| Speak selection or clipboard (again to stop) | `Ctrl+Alt+S` |
 | Stop speaking | `Ctrl+Alt+X` |
 | Show or hide mini mode | `Ctrl+Alt+Shift+M` |
+| Pause or resume speech, Show main window | unassigned |
 | Cancel the dictation (only while dictating into another app) | `Esc` |
 
 All of these except `Esc` can be changed in **Settings > Shortcuts**.
@@ -91,4 +94,5 @@ When TTSPython is already running, these are passed to the running copy.
 ## Files
 
 - Settings: `%APPDATA%\TTSPython\settings.json` (Windows), `~/.config/ttspython/settings.json` (Linux). Saved automatically, with the queue (`queue.json`) and unsaved text (`recovery.json`) next to it.
-- Downloaded Piper voices and the Piper program: `%LOCALAPPDATA%\TTSPython` (Windows), `~/.local/share/ttspython` (Linux).
+- Downloaded Piper voices, the Piper program, live preview models and your own voices: `%LOCALAPPDATA%\TTSPython` (Windows), `~/.local/share/ttspython` (Linux).
+- Whisper models: the shared Hugging Face cache (`~/.cache/huggingface`, or `%USERPROFILE%\.cache\huggingface` on Windows). Delete them in **Settings > Listen > Downloaded models**.

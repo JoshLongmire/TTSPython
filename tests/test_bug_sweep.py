@@ -23,7 +23,7 @@ def _fake_hub(monkeypatch, folder):
 
     calls = []
 
-    def snapshot(repo, allow_patterns=None, local_files_only=False, tqdm_class=None):
+    def snapshot(repo, revision=None, allow_patterns=None, local_files_only=False, tqdm_class=None):
         calls.append(local_files_only)
         if not local_files_only:  # the online call finishes the download
             (folder / "model.bin").write_bytes(b"weights")
@@ -42,7 +42,7 @@ def test_interrupted_model_download_is_resumed(tmp_path, monkeypatch):
     (folder / "tokenizer.json").write_text("{}")  # model.bin never arrived
     calls = _fake_hub(monkeypatch, folder)
     assert service.download_whisper("small") == str(folder)
-    assert calls == [True, False]  # the local copy was not trusted
+    assert calls == [True, True, False]  # neither local copy was trusted: pinned, then an older download
     assert (folder / "model.bin").exists()
 
 
@@ -402,7 +402,8 @@ def test_downloaded_models_are_listed_and_deleted(qtbot, tmp_path, monkeypatch):
     assert service.downloaded_models(lambda: cache) == [("large-v3-turbo", 1_620_000_000), ("small", 484_000_000)]
     monkeypatch.setattr(service, "downloaded_models", lambda scan=None: service.__dict__["_listed"](cache))
     service._listed = lambda c: sorted((n, r.size_on_disk) for r in c.repos
-                                       for n, repo in service.WHISPER_REPOS.items() if repo == r.repo_id)
+                                       for n, repo in service.WHISPER_REPOS.items()
+                                       if r.repo_id == repo or service.FORMER_REPOS.get(r.repo_id) == n)
     real_delete = service.delete_model
     monkeypatch.setattr(service, "delete_model", lambda name, scan=None: real_delete(name, lambda: cache))
     c = make_controller(qtbot, tmp_path)

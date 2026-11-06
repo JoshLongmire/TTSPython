@@ -23,6 +23,25 @@ WIN_PRIVATE_FORMATS = {
 }
 
 
+def is_private_clipboard(mime):
+    """Did the app that copied this ask others to leave it alone? Password managers do."""
+    if mime is None:
+        return False
+    if mime.hasFormat('application/x-qt-windows-mime;value="ExcludeClipboardContentFromMonitorProcessing"'):
+        return True
+    return bytes(mime.data("x-kde-passwordManagerHint")) == b"secret"
+
+
+def _private_text(text):
+    """The text for the clipboard, kept out of Windows' clipboard history and cloud sync."""
+    data = QMimeData()
+    data.setText(text)
+    if IS_WINDOWS:
+        for fmt, value in WIN_PRIVATE_FORMATS.items():
+            data.setData(fmt, value)
+    return data
+
+
 def snapshot_clipboard(clipboard):
     """Copy every format on the clipboard (None if too large to copy)."""
     source = clipboard.mimeData()
@@ -65,7 +84,7 @@ class TextInjector(QObject):
 
     def copy_only(self, text, reason=""):
         self._suppress(text)
-        self.clipboard.setText(text)
+        self.clipboard.setMimeData(_private_text(text))
         self.finished.emit(False, reason or "Copied to clipboard. Press Ctrl+V to paste.")
 
     def inject(self, text, target=None):
@@ -96,12 +115,8 @@ class TextInjector(QObject):
         self._busy = True
         snapshot = snapshot_clipboard(self.clipboard)
         previous_text = self.clipboard.text()
-        data = QMimeData()
-        data.setText(text)
-        for fmt, value in WIN_PRIVATE_FORMATS.items():
-            data.setData(fmt, value)
         self._suppress(text)
-        self.clipboard.setMimeData(data)
+        self.clipboard.setMimeData(_private_text(text))
         ours = winapi.clipboard_sequence()
         waited = [0]
 

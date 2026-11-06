@@ -1,6 +1,6 @@
 # Adding Voices to TTSPython
 
-TTSPython speaks with two kinds of voices:
+TTSPython speaks with three kinds of voices: your computer's own, natural voices you download, and [your own voice](#your-own-voice).
 
 - **Natural voices (Piper)**: neural voices that sound much closer to a person. They run offline on your
   computer, on Windows and Linux. You download the ones you want from inside the app.
@@ -23,7 +23,7 @@ Good English voices to start with: **Lessac** (United States, medium), **Amy** (
 
 Things to know:
 - There are 178 voices in 53 languages. Each one is downloaded once; after that it works without internet.
-- Downloads are checked against their published checksums. A broken or cancelled download leaves nothing behind. Closing the window (or `Esc`) cancels a running download.
+- Downloads are checked against their published checksums. A broken or cancelled download leaves nothing behind. **Cancel download**, closing the window or `Esc` stops a running download.
 - Speed works the same as with system voices (50% to 200%), and changes while it speaks.
 - To remove a voice, select it in **Get more voices** and press **Remove** (switch to another voice first).
 - Voices and the Piper program are stored in `%LOCALAPPDATA%\TTSPython` (Windows) or `~/.local/share/ttspython` (Linux).
@@ -41,8 +41,8 @@ Things to know:
 2. Press **Start recording**, read the statement on screen out loud, then press **Stop recording**.
 3. Press **Hear it**, then **Use this voice**.
 
-The statement has three code words that change on every try, and the recording has to say them, so a voice cannot be
-made from a file or from someone else's old recording. **Remove** deletes a voice and its recording. See the
+The statement has three code words that change on every try, and the recording has to say them and little else, and
+a voice cannot be made from a file. **Remove** deletes a voice and its recording. See the
 [README](README.md#your-own-voice) for what it needs from your computer.
 
 ## Windows voices
