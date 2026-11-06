@@ -121,20 +121,16 @@ def com_apartment():
         yield
         return
     initialized = False
-    try:
+    with contextlib.suppress(Exception):
         import comtypes
 
         comtypes.CoInitialize()
         initialized = True
-    except Exception:
-        pass
     try:
         yield
     finally:
         if initialized:
-            try:
+            with contextlib.suppress(Exception):
                 import comtypes
 
                 comtypes.CoUninitialize()
-            except Exception:
-                pass

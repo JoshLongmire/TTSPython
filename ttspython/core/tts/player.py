@@ -190,10 +190,8 @@ class AudioPlayer:
                 self._stream_stopped = False
                 stream = self._stream
                 if stream is not None:
-                    try:
+                    with contextlib.suppress(Exception):
                         stream.start()
-                    except Exception:
-                        pass
 
     def _schedule_pause_stop(self):
         timer = threading.Timer(PAUSE_STOP_SECONDS, self._stop_if_still_paused)
@@ -209,11 +207,9 @@ class AudioPlayer:
             stream = self._stream
             if stream is None or self._stream_stopped:
                 return
-            try:
+            with contextlib.suppress(Exception):
                 stream.stop()
                 self._stream_stopped = True
-            except Exception:
-                pass
 
     # --- speed -------------------------------------------------------------------
     @property
@@ -272,13 +268,11 @@ class AudioPlayer:
 
     def _candidate_rates(self, device):
         rates = [self._preferred_rate]
-        try:
+        with contextlib.suppress(Exception):
             info = self.sd.query_devices(device, "output")
             default = int(info.get("default_samplerate") or 0)
             if default and default not in rates:
                 rates.append(default)
-        except Exception:
-            pass
         for r in (48000, 44100):
             if r not in rates:
                 rates.append(r)
@@ -296,11 +290,9 @@ class AudioPlayer:
 
     @staticmethod
     def _close_stream(stream):
-        try:
+        with contextlib.suppress(Exception):
             stream.stop()
             stream.close()
-        except Exception:
-            pass
 
     def close(self):
         with self._lock:

@@ -5,6 +5,7 @@ settings store {"name", "hostapi", "index"} and resolve by name first.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 
@@ -19,6 +20,17 @@ class DeviceInfo:
 
     def ref(self):
         return {"name": self.name, "hostapi": self.hostapi, "index": self.index}
+
+
+_PLAYBACK_DEVICE = re.compile(
+    r"stereo mix|what u hear|wave out|mixage st|loopback|monitor of|vb-?audio|vb-?cable|cable output|voicemeeter|"
+    r"blackhole|soundflower|virtual (audio|cable|mic)", re.IGNORECASE)
+
+
+def plays_back_the_computer(name):
+    """Does this input record what the computer itself plays, rather than a room? By its name: there
+    is no other way to tell. A voice must come from someone speaking, not from a video of them."""
+    return bool(name and _PLAYBACK_DEVICE.search(name))
 
 
 def query_devices(sd=None):

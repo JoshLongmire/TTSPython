@@ -422,7 +422,7 @@ def test_mini_play_speaks_clipboard_and_toggles_stop(ctl, qtbot):
     ctl.mini.play.click()
     qtbot.waitUntil(lambda: ctl.speech.busy, timeout=2000)
     ctl.mini.play.click()
-    assert not ctl.speech.busy
+    qtbot.waitUntil(lambda: not ctl.speech.busy, timeout=2000)
 
 
 def test_dictation_target_editor_vs_clipboard_only(ctl):

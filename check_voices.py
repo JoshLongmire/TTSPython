@@ -6,6 +6,7 @@ Uses the same speech engine as the app (SAPI5 on Windows, espeak-ng on Linux).
 
 import os
 import sys
+import contextlib
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -65,7 +66,5 @@ def check_voices():
 
 if __name__ == "__main__":
     check_voices()
-    try:
+    with contextlib.suppress(EOFError):
         input("Press Enter to exit...")
-    except EOFError:
-        pass

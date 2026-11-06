@@ -25,7 +25,7 @@ def resample(samples, src_rate, dst_rate):
         half = taps.size // 2
         # Repeating the edge samples keeps a short block from fading out at both ends.
         samples = np.convolve(np.pad(samples, half, mode="edge"), taps, mode="valid")
-    n = max(1, int(round(samples.size * dst_rate / src_rate)))
+    n = max(1, round(samples.size * dst_rate / src_rate))
     x_old = np.linspace(0.0, 1.0, samples.size, endpoint=False)
     x_new = np.linspace(0.0, 1.0, n, endpoint=False)
     return np.interp(x_new, x_old, samples).astype(np.float32)

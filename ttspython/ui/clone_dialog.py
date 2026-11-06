@@ -1,14 +1,27 @@
 """Your own voice: read a statement out loud and the app makes a copy of your voice from that recording."""
 from __future__ import annotations
 
+import contextlib
 import threading
 
 from PySide6.QtCore import QObject, Qt, QTimer, Signal
 from PySide6.QtWidgets import (
-    QDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMessageBox, QProgressBar, QPushButton,
-    QScrollArea, QVBoxLayout, QWidget,
+    QDialog,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QListWidget,
+    QListWidgetItem,
+    QMessageBox,
+    QProgressBar,
+    QPushButton,
+    QScrollArea,
+    QVBoxLayout,
+    QWidget,
 )
 
+from ..core.audio_devices import plays_back_the_computer
 from ..core.download import DownloadCancelled
 from ..core.resample import resample
 from ..core.stt.recorder import Recorder
@@ -283,10 +296,8 @@ class CloneDialog(QDialog):
 
     @staticmethod
     def _emit(signal, *args):
-        try:
+        with contextlib.suppress(RuntimeError):  # the window was closed while this was running
             signal.emit(*args)
-        except RuntimeError:
-            pass  # the window was closed while this was running
 
     def _on_progress(self, done, total):
         self.progress.setRange(0, max(1, total))
@@ -318,8 +329,13 @@ class CloneDialog(QDialog):
         if reason:
             self._set_status(reason)
             return
-        self.recording_started.emit()
         device = self._input_device() if callable(self._input_device) else self._input_device
+        name = self._input_name(device)
+        if plays_back_the_computer(name):
+            self._set_status(f"{name} records what this computer plays. Your voice has to come from you speaking "
+                             "into a microphone: pick one in Settings > Listen.")
+            return
+        self.recording_started.emit()
         try:
             self._recorder.start(device)
         except Exception as exc:
@@ -331,6 +347,13 @@ class CloneDialog(QDialog):
         self._set_status("Recording. Read the whole statement, then press Stop.")
         self._meter.start()
         self._update_buttons()
+
+    def _input_name(self, device):
+        """The name of the input that would record, or "" if it cannot be told."""
+        try:
+            return str(self._recorder.sd.query_devices(device, "input")["name"])
+        except Exception:
+            return ""
 
     @property
     def recording(self):

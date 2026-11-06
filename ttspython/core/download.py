@@ -1,6 +1,7 @@
 """Download a file with progress and a checksum check (voices and the Piper program)."""
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import os
 import time
@@ -56,10 +57,8 @@ def fetch(url, dest, progress=None, md5=None, sha256=None, cancel=None, opener=_
             raise ChecksumError(f"The download of {os.path.basename(dest)} was damaged (checksum mismatch). Try again.")
         atomic_replace(part, dest)
     except BaseException as exc:
-        try:
+        with contextlib.suppress(OSError):
             os.remove(part)
-        except OSError:
-            pass
         if isinstance(exc, (urllib.error.URLError, TimeoutError, ConnectionError)):
             reason = getattr(exc, "reason", None) or exc
             raise OSError(f"Could not download {os.path.basename(dest)}: check your internet connection ({reason}).") from exc

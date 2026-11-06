@@ -1,13 +1,25 @@
 """Get more voices: download Piper voices, remove them, or add system voices."""
 from __future__ import annotations
 
+import contextlib
 import threading
 
 from PySide6.QtCore import QObject, QRect, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QFontMetrics, QPainter
 from PySide6.QtWidgets import (
-    QComboBox, QDialog, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMessageBox, QProgressBar, QPushButton,
-    QStyle, QStyledItemDelegate, QVBoxLayout,
+    QComboBox,
+    QDialog,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QListWidget,
+    QListWidgetItem,
+    QMessageBox,
+    QProgressBar,
+    QPushButton,
+    QStyle,
+    QStyledItemDelegate,
+    QVBoxLayout,
 )
 
 from ..core import platform as plat
@@ -262,10 +274,8 @@ class VoiceBrowser(QDialog):
 
     @staticmethod
     def _emit(signal, *args):
-        try:
+        with contextlib.suppress(RuntimeError):  # the window was closed meanwhile
             signal.emit(*args)
-        except RuntimeError:  # the window was closed meanwhile
-            pass
 
     def _on_progress(self, done, total, what):
         self.progress.setRange(0, max(1, total))

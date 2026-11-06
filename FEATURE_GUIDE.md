@@ -104,6 +104,8 @@ In the status bar (or Settings > Clipboard):
 - **New** (`Ctrl+N`) starts an empty document. Drop a text file on the editor to open it (to read several, drop them on the queue). The Open button's arrow lists the last 8 files. Opening a file while the old one is being read stops the reading; the queue and clipboard keep playing.
 - Opening a file, New, closing the window or quitting asks first if there are unsaved changes: **Save**, **Discard** or **Cancel** (Enter saves). Quitting also asks if an export or a dictation is still running.
 - Unsaved text is kept every 30 seconds (and when Windows logs off or shuts down) and put back the next time TTSPython starts, even after a crash.
+- A file whose lines end in different ways (some Windows, some Unix) keeps them: only lines you add or remove take the file's most common ending.
+- A dictation survives a crash or a power cut, up to about the last second: the sound goes to a file as you speak, and is deleted once the text is delivered. At the next start, **Try again** on the Listen page puts the text in the editor. **Settings > Listen > Keep the recording until it is typed** turns this off.
 
 ## Themes and appearance
 

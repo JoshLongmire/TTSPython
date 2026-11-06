@@ -7,6 +7,7 @@ Linux: the X11 primary selection (what middle-click would paste).
 """
 from __future__ import annotations
 
+import contextlib
 import itertools
 import threading
 
@@ -84,11 +85,9 @@ def warm_up():
     """Generate the UI Automation wrapper ahead of the first Play (it takes a moment once)."""
     if not IS_WINDOWS:
         return
-    try:
+    with contextlib.suppress(Exception):
         with com_apartment():
             _automation()
-    except Exception:
-        pass
 
 
 class SelectionGrabber(QObject):

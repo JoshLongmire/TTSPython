@@ -4,8 +4,20 @@ from __future__ import annotations
 from PySide6.QtCore import QRect, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFontMetrics, QPainter
 from PySide6.QtWidgets import (
-    QAbstractItemView, QFrame, QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QProgressBar, QPushButton,
-    QSizePolicy, QStyle, QStyledItemDelegate, QToolButton, QVBoxLayout, QWidget,
+    QAbstractItemView,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QListWidget,
+    QListWidgetItem,
+    QProgressBar,
+    QPushButton,
+    QSizePolicy,
+    QStyle,
+    QStyledItemDelegate,
+    QToolButton,
+    QVBoxLayout,
+    QWidget,
 )
 
 from ..core.settings import RATE_MAX, RATE_MIN, percent_wpm, speed_percent
@@ -143,6 +155,7 @@ class QueuePanel(TextFileDropMixin, QFrame):
         lay.addLayout(header)
 
         self.list = QueueList()
+        self.list.setAccessibleName("Speech queue items")
         self.files_dropped.connect(self.list.files_dropped)
         lay.addWidget(self.list, 1)
 
@@ -346,7 +359,7 @@ class TransportBar(QFrame):
         self.volume.blockSignals(True)
         self.rate.setValue(speed_percent(rate))
         self.rate_label.setText(f"{speed_percent(rate)}%")
-        self.volume.setValue(int(round(volume * 100)))
+        self.volume.setValue(round(volume * 100))
         self.volume_label.setText(f"{self.volume.value()}%")
         self.rate.blockSignals(False)
         self.volume.blockSignals(False)
@@ -392,6 +405,10 @@ class ListenPanel(QFrame):
         self.retry.setToolTip("Transcribe the recording that could not be transcribed. A new dictation replaces it.")
         self.retry.hide()  # only while a recording is kept
         lay.addWidget(self.retry)
+        self.discard = QPushButton("Discard")
+        self.discard.setToolTip("Delete the recording that is kept for Try again.")
+        self.discard.hide()
+        lay.addWidget(self.discard)
         self.cancel = QPushButton("Cancel")
         self.cancel.setToolTip("Stop the download and throw this recording away. It starts again the next time you dictate.")
         self.cancel.hide()  # only while a model is downloading

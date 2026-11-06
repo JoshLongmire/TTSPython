@@ -15,7 +15,7 @@ A free, open-source, offline text-to-speech (TTS) and speech-to-text (STT) deskt
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-lightgrey.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
-![Version](https://img.shields.io/badge/version-5.0.0-brightgreen.svg)
+![Version](https://img.shields.io/badge/version-5.1.0-brightgreen.svg)
 
 ## Features
 
@@ -274,7 +274,10 @@ Errors are written to the `logs` folder inside `%LOCALAPPDATA%\TTSPython` (Windo
 - The microphone is muted, or Windows does not let apps use it: **Settings > Privacy & security > Microphone**, turn on access for desktop apps.
 
 ### A dictation could not be transcribed
-- The text that was already final is typed, and the recording is kept: press **Try again** on the Listen page, for example once you are back online, or after picking another model. It stays until you start a new dictation or quit.
+- The text that was already final is typed, and the recording is kept: press **Try again** on the Listen page, for example once you are back online, or after picking another model. **Discard** deletes it. It stays until then, even if you quit, or until you start a new dictation.
+
+### The app crashed or the power went while I was dictating
+- Nothing you said is lost, up to about the last second. The sound goes to a file on your computer as you speak, in the `dictation` folder inside `%LOCALAPPDATA%\TTSPython` (Windows) or `~/.local/share/ttspython` (Linux). At the next start the app says so: press **Try again** on the Listen page to get the text in the editor, or **Discard** to delete the recording. The file is deleted as soon as the text is delivered. To keep recordings in memory only, turn off **Settings > Listen > Keep the recording until it is typed**.
 
 ### The microphone stopped in the middle
 - If a microphone stops sending sound (unplugged, or its driver stopped), dictation stops and types what it heard, and the status bar says so.
@@ -319,7 +322,7 @@ python packaging/build.py --installer   # Windows: also the installer (needs Inn
 ```
 Each system builds its own app (PyInstaller cannot build for another OS). Build Linux on the oldest distribution
 you want to support. Pushing a `v*` tag runs `.github/workflows/build.yml`, which builds and smoke-tests both
-and attaches them to the GitHub release, using the exact tested versions in `packaging/constraints.txt`. To check a build, run it with `TTSPYTHON_SELFTEST=<report.json>`: it loads
+and attaches them to the GitHub release, after the test suite. Packages come from `packaging/requirements-windows.lock` and `requirements-linux.lock`, which hold the exact tested versions and the hash of every file (made from `packaging/constraints.txt`; `packaging/build-requirements.txt` says how). To try the whole thing without releasing, run the workflow by hand: only a `v*` tag publishes. To check a build, run it with `TTSPYTHON_SELFTEST=<report.json>`: it loads
 every part (voices, the Piper voice list, MP3 export, Whisper libraries, the live preview engine and, if downloaded,
 its model, audio devices), writes the report (with a `problems` list, empty when all is well) and quits,
 without sound. `python packaging/build.py --check` does this right after building and fails if it finds a problem. Add `TTSPYTHON_SELFTEST_STT=tiny` to also dictate a spoken test phrase through the real transcription

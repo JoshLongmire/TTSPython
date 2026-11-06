@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import enum
 import gc
+import hashlib
 import logging
 import os
 import queue
@@ -37,7 +38,9 @@ from ..events import EventEmitter
 from ..resample import resample
 from ..transcript import normalize_transcript_text
 from . import preview as preview_mod
-from .recorder import Recorder
+from . import spool as spool_mod
+from . import whisper_digests
+from .recorder import Recorder, blocks_to_float
 
 log = logging.getLogger(__name__)
 
@@ -76,6 +79,7 @@ def friendly_audio_error(exc):
 
 RETRY_HINT = "Your recording is kept: press Try again on the Listen page. A new dictation replaces it."
 QUIET_PEAK = 0.02  # a recording quieter than this all through holds no speech
+MIN_AUDIO_SECONDS = 0.2  # shorter than this holds no word
 
 _NUMBER_WORDS = ("zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen "
                  "fifteen sixteen seventeen eighteen nineteen twenty").split()
@@ -207,6 +211,45 @@ WHISPER_REVISIONS = {
 FORMER_REPOS = {"mobiuslabsgmbh/faster-whisper-large-v3-turbo": "large-v3-turbo"}
 
 
+class DamagedDownload(RuntimeError):
+    """A downloaded model file is not what its commit holds."""
+
+
+def check_download(folder, digests):
+    """Raises DamagedDownload if a file differs from its digest. A commit pins which files are wanted,
+    but the download itself is only checked for size: this is what says they arrived as they should."""
+    for name, wanted in digests.items():
+        digest = hashlib.sha256()
+        try:
+            with open(os.path.join(folder, name), "rb") as f:
+                while chunk := f.read(1 << 22):
+                    digest.update(chunk)
+        except OSError as exc:
+            raise DamagedDownload(f"{name} could not be read after downloading: {exc}") from exc
+        if digest.hexdigest() != wanted:
+            raise DamagedDownload(f"{name} did not arrive as it should")
+
+
+def _digests_for(name):
+    return whisper_digests.DIGESTS.get(name)
+
+
+def verify_download(name, folder):
+    """Check a freshly downloaded pinned model. If it is damaged it is removed, so the next try starts clean."""
+    digests = _digests_for(name)
+    if not digests:
+        return  # a model given by folder or repo name, which nothing pins
+    try:
+        check_download(folder, digests)
+    except DamagedDownload as exc:
+        try:
+            delete_model(name)
+        except Exception:
+            log.exception("A damaged model could not be removed")
+        raise DamagedDownload(f"The {name} model did not download correctly, so it was removed. "
+                              f"Please try again. ({exc})") from exc
+
+
 def downloaded_models(scan=None):
     """[(model name, bytes on disk)] for the Whisper models in the download cache."""
     try:
@@ -300,8 +343,8 @@ def download_whisper(name, progress=None, cancel=None):
             if model_complete(local):
                 return local
             # The folder exists but a download was interrupted: the online call below resumes it.
-        except Exception:
-            pass  # not downloaded yet
+        except Exception:  # not downloaded yet
+            log.debug("%s is not in the download cache", where)
     bars, done = [], threading.Event()
     t0 = time.perf_counter()
 
@@ -337,6 +380,7 @@ def download_whisper(name, progress=None, cancel=None):
                 raise DownloadCancelled
         if "error" in outcome:
             raise outcome["error"]
+        verify_download(name, outcome["path"])
         return outcome["path"]
     finally:
         done.set()
@@ -365,8 +409,8 @@ class _Worker:
             fn, args = job
             try:
                 fn(*args)
-            except Exception:
-                pass  # jobs report their own errors through events
+            except Exception:  # jobs report their own errors through events; this one got past that
+                log.exception("A dictation job failed")
 
     def shutdown(self):
         while True:
@@ -472,7 +516,10 @@ class SttService:
         self._checked = ("", 0.0)  # Whisper's text after the settled part, and the audio second it reaches
         self._pass_now = threading.Event()
         self._caption_lock = threading.Lock()
-        self._kept = None  # (audio, target) of a recording that could not be transcribed: Try again
+        self._kept = None  # (audio, target) of this session's recording that could not be transcribed: Try again
+        self._recovered = None  # the file of a recording a crash or a quit left: Try again, until used or discarded
+        self.closing = False  # quitting: nothing can be delivered any more, so nothing may be deleted
+        self.spool_folder = None  # where recordings go as they are said, until the text is delivered
         self.recorder.on_limit = lambda: self.stop()
         self.recorder.on_lost = self._microphone_lost
 
@@ -517,15 +564,20 @@ class SttService:
                 return False
             self._cancel_timer()
             failure = None
+            previous = getattr(self.recorder, "spool", None)
             try:
+                self.recorder.spool_folder = self.spool_folder
                 self.recorder.start(self.input_device)
             except Exception as exc:
                 failure = f"Could not start recording: {friendly_audio_error(exc)}"
                 self._schedule_unload()  # the timer was cancelled above
             else:
                 self._target = target
-                dropped = self._kept is not None
+                dropped = self._kept is not None and self._recovered is None
                 self._kept = None
+                if previous is not None:
+                    previous.discard()  # by its own thread, should it still be closing the file
+                self._forget_older_recordings()
                 self._load_failed = None
                 self._cancelled = False
                 self._settled_text = ""
@@ -601,14 +653,11 @@ class SttService:
         with self._lock:
             if self._state is not SttState.RECORDING:
                 return False
-            try:
+            if hasattr(self.recorder, "stop_capture"):
+                self.recorder.stop_capture()
+                audio = self.recorder.take_audio  # a long recording takes seconds: on the worker, not here
+            else:
                 audio = self.recorder.stop()
-            except Exception as exc:  # out of memory, on a very long recording
-                self._stop_preview()
-                self._session += 1
-                self._set_state(SttState.IDLE)
-                self.events.emit("error", f"Could not finish the recording: {exc}")
-                return False
             self._stop_preview()
             target = self._target
             self._session += 1
@@ -622,29 +671,119 @@ class SttService:
             self.events.emit("model_status", "The microphone stopped responding, so dictation stopped there.")
 
     def retry(self):
-        """Transcribe again the recording kept when transcribing failed. False if there is none."""
+        """Transcribe again the recording kept when transcribing failed, or left by a crash. False if there is none."""
         with self._lock:
-            if self._kept is None or self._state is not SttState.IDLE:
+            if self._state is not SttState.IDLE or (self._kept is None and self._recovered is None):
                 return False
-            audio, target = self._kept
-            self._kept = None
+            if self._recovered is not None:  # its own text, nothing to do with this session's
+                audio, target = self._recovered, "editor"
+                self._recovered = None
+                self._settled_text = ""
+                self._settled_samples = 0
+            else:
+                audio, target = self._kept
+                self._kept = None
             self._cancelled = False
             self._last_pass = None
             self.cache.cancel_download.clear()
             self._session += 1
             self._set_state(SttState.TRANSCRIBING)
-        self.events.emit("retry_available", False)
+        self.events.emit("retry_available", self._kept is not None)
         self._pool.submit(self._transcribe, audio, target)
         return True
 
-    def _keep_for_retry(self, audio, target, message):
+    def recover(self):
+        """Offer what a crash or a quit left behind, on the Listen page (Try again). Its text goes to the
+        editor: by now the app it was meant for may be anywhere. It stays until used or discarded, whatever
+        else is dictated meanwhile. Returns its length in seconds, 0 if none."""
+        folder = self.spool_folder
+        if not folder:
+            return 0.0
+        with self._lock:
+            if self._state is not SttState.IDLE or self._recovered is not None:
+                return 0.0
+            found = spool_mod.find(folder)
+            newest = found[0] if found else None
+            seconds = spool_mod.seconds_in(newest) - spool_mod.delivered_seconds(newest) if newest else 0.0
+            if seconds < MIN_AUDIO_SECONDS:
+                newest, seconds = None, 0.0
+            spool_mod.remove_all(folder, keep=(newest,))
+            if newest is None:
+                return 0.0
+            self._recovered = newest
+        self.events.emit("retry_available", True)
+        return seconds
+
+    def discard_kept(self):
+        """Throw away what is kept for Try again, for good. False if there is nothing."""
+        with self._lock:
+            if self._state is not SttState.IDLE or (self._kept is None and self._recovered is None):
+                return False
+            self._kept = None
+            if self._recovered is not None:
+                spool_mod.remove(self._recovered)
+                self._recovered = None
+            self._delete_recording()
+        self.events.emit("retry_available", False)
+        return True
+
+    def stop_keeping_files(self, folder):
+        """Recordings stay in memory from now on, and none is left on disk."""
+        self.spool_folder = None
+        self._recovered = None
+        spool_mod.remove_all(folder)
+        self.events.emit("retry_available", self._kept is not None)
+
+    def _end_capture(self):
+        """Closes the microphone, without the work of turning the recording into audio nobody wants."""
+        if hasattr(self.recorder, "stop_capture"):
+            self.recorder.stop_capture()
+            self.recorder.drop_audio()
+        else:
+            self.recorder.stop()
+
+    def _keep_on_disk(self):
+        spool = getattr(self.recorder, "spool", None)
+        return {path for path in (spool.path if spool is not None else None, self._recovered) if path}
+
+    def _delete_recording(self):
+        """The text has been delivered, or the recording thrown away: nothing of it stays on disk."""
+        if self.closing:  # it could not be delivered after all: the next start offers it
+            return
+        spool = getattr(self.recorder, "spool", None)
+        if spool is not None:
+            spool.discard()
+        if self.spool_folder:
+            spool_mod.remove_all(self.spool_folder, keep=self._keep_on_disk())
+
+    def _forget_older_recordings(self):
+        if self.spool_folder:
+            spool_mod.remove_all(self.spool_folder, keep=self._keep_on_disk())
+
+    def _load_recording(self, path):
+        """float32 at 16 kHz from a recording's file, or None if it cannot be read."""
+        found = spool_mod.read(path)
+        if found is None:
+            return None
+        samples, rate = found
+        samples = samples[int(spool_mod.delivered_seconds(path) * rate):]  # already typed before the last session ended
+        blocks = [samples[i:i + 4096] for i in range(0, samples.size, 4096)]
+        return blocks_to_float(blocks, rate, self.recorder.sample_rate)
+
+    def _keep_for_retry(self, audio, target, message, file=None):
         """Words must not be lost to a model that would not load or a pass that failed. Text that
         was already final is delivered now; only the rest waits."""
         settled, self._settled_text = self._settled_text, ""
         settled = normalize_transcript_text(settled) if settled else ""
         if settled:
             self.events.emit("transcript_ready", settled, target)
-        self._kept = (audio, target)
+            spool = getattr(self.recorder, "spool", None)
+            if spool is not None:
+                spool_mod.mark_delivered(spool.path, self._settled_samples / self.recorder.sample_rate)
+        if file:
+            self._recovered = file
+        else:
+            self._kept = (audio, target)
         self.events.emit("retry_available", True)
         self.events.emit("error", f"{message} {RETRY_HINT}")
 
@@ -657,7 +796,8 @@ class SttService:
             self._cancelled = True
             self.cache.cancel_download.set()
             if self._state is SttState.RECORDING:
-                self.recorder.stop()
+                self._end_capture()
+                self._delete_recording()
                 self._stop_preview()
                 self._set_state(SttState.IDLE)
                 self._schedule_unload()
@@ -870,10 +1010,21 @@ class SttService:
                 time.sleep(0.02)
 
     def _transcribe(self, audio, target):
+        file = None
         try:
             if self._cancelled:
+                if callable(audio):
+                    self.recorder.drop_audio()
                 return
-            if audio.size < self.recorder.sample_rate * 0.2:
+            if callable(audio):  # what the recorder holds
+                audio = audio()
+            if isinstance(audio, str):  # what a crash left
+                file = audio
+                audio = self._load_recording(file)
+                if audio is None:
+                    self.events.emit("error", "The recording left by the last session could not be read.")
+                    return
+            if audio.size < self.recorder.sample_rate * MIN_AUDIO_SECONDS:
                 self.events.emit("model_status", "No audio captured")
                 return
             if float(abs(audio).max()) < SILENT_PEAK:
@@ -881,7 +1032,7 @@ class SttService:
                 return
             failed, self._load_failed = self._load_failed, None
             if failed and failed[0] == self.model:
-                self._keep_for_retry(audio, target, f"Could not transcribe: the {self.model} model failed to load ({failed[1]}).")
+                self._keep_for_retry(audio, target, f"Could not transcribe: the {self.model} model failed to load ({failed[1]}).", file)
                 return
             tail = self._reusable_tail(audio)
             if tail is None:
@@ -901,8 +1052,13 @@ class SttService:
             pass  # the user knows: cancel() said so
         except Exception as exc:
             if not self._cancelled:
-                self._keep_for_retry(audio, target, f"Failed to transcribe: {exc}.")
+                self._keep_for_retry(audio, target, f"Failed to transcribe: {exc}.", file)
         finally:
+            if file:
+                if self._recovered != file and not self.closing:
+                    spool_mod.remove(file)
+            elif self._kept is None:
+                self._delete_recording()
             self._set_state(SttState.IDLE)
             if self.unload_when_idle:
                 self.unload()
@@ -962,6 +1118,9 @@ class SttService:
 
     def shutdown(self):
         if self._state is SttState.RECORDING:
-            self.recorder.stop()
+            self._end_capture()
+        spool = getattr(self.recorder, "spool", None)
+        if spool is not None:
+            spool.wait(1.0)  # what is on its way to the disk; the next start offers it
         self._cancel_timer()
         self._pool.shutdown()

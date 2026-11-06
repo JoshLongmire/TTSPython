@@ -1,0 +1,6 @@
+# What a release is built from: the app, and the tool that packages it. The two lock files are made from this
+# and constraints.txt, with the hash of every file. After changing either, on any computer:
+#   uv pip compile packaging/build-requirements.txt -c packaging/constraints.txt --python-version 3.13 --python-platform windows --generate-hashes --no-annotate -o packaging/requirements-windows.lock
+#   uv pip compile packaging/build-requirements.txt -c packaging/constraints.txt --python-version 3.13 --python-platform x86_64-manylinux_2_35 --generate-hashes --no-annotate -o packaging/requirements-linux.lock
+-r ../requirements.txt
+pyinstaller>=6.10

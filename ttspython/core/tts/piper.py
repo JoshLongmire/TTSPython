@@ -9,6 +9,7 @@ once, on first use, into the per-user data folder:
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import re
@@ -221,10 +222,8 @@ def install_voice(key, progress=None, cancel=None, opener=None):
 
 def _remove_files(key):
     for path in (model_path(key), model_path(key) + ".json"):
-        try:
+        with contextlib.suppress(OSError):
             os.remove(path)
-        except OSError:
-            pass
 
 
 def remove_voice(key):
@@ -299,18 +298,14 @@ class _Process:
             with open(path, "rb") as f:
                 data = f.read()
         finally:
-            try:
+            with contextlib.suppress(OSError):
                 os.remove(path)
-            except OSError:
-                pass
         return parse_wav(data)
 
     def close(self):
-        try:
+        with contextlib.suppress(Exception):
             self.proc.kill()
             self.proc.wait(2)
-        except Exception:
-            pass
         shutil.rmtree(self.out_dir, ignore_errors=True)
 
 

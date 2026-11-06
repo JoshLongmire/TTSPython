@@ -1,6 +1,7 @@
 """Wires services, windows, tray, hotkeys and settings together."""
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import re
@@ -22,8 +23,9 @@ from ..core.tts import clone as voice_clone
 from ..core.tts.controller import Source, SpeechController, State
 from ..core.tts.export import AudioExporter, mp3_available
 from ..core.tts.render import pick_default_voice
-from ..platform.hotkeys import GlobalHotkeys, availability as hotkey_availability
-from ..platform.inject import TextInjector, is_private_clipboard
+from ..platform.hotkeys import GlobalHotkeys
+from ..platform.hotkeys import availability as hotkey_availability
+from ..platform.inject import TextInjector, is_private_clipboard, keep_clipboard_after_exit
 from ..platform.selection import SelectionGrabber
 from . import icons
 from .bridge import ExportBridge, SpeechBridge, SttBridge
@@ -39,7 +41,9 @@ SHORTCUT_ACTIONS = tuple(keys.DEFAULT_SHORTCUTS)
 TEXT_FILTER = "Text files (*.txt);;All files (*)"
 
 
-STILL_STOPPING = "Still stopping the previous speech. Try again in a moment."
+STILL_STOPPING = "Still stopping the previous speech. What you asked for next starts when it has."
+STOP_PATIENCE_MS = 2000  # stopping takes longer than this only when a speech engine is stuck
+RECORDINGS_FOLDER = "dictation"  # in the data folder
 HOTKEY_RETRY_MS = (3000, 7000)  # retry busy hotkeys 3 s after start, then 10 s
 PREVIEW_MODEL_LABEL = "live preview"  # its row in Settings > Listen > Downloaded models
 
@@ -114,6 +118,7 @@ class AppController(QObject):
             auto_unload=s["stt_auto_unload_enabled"], auto_unload_minutes=s["stt_auto_unload_minutes"])
         if not services.get("stt"):
             self.stt.preview_enabled = s["stt_live_preview"]
+        self._apply_keep_recording(s)
         self.exporter = services.get("exporter") or AudioExporter()
         self.speech_bridge = SpeechBridge(self.speech, self)
         self.stt_bridge = SttBridge(self.stt, self)
@@ -285,8 +290,11 @@ class AppController(QObject):
         st.model_status.connect(self._on_model_status)
         st.preview_status.connect(self._on_preview_status)
         st.error.connect(lambda msg: self._error("Dictation", msg))
-        st.retry_available.connect(self.window.listen_panel.retry.setVisible)
-        self.window.listen_panel.retry.clicked.connect(lambda: self.stt.retry())
+        panel = self.window.listen_panel
+        st.retry_available.connect(panel.retry.setVisible)
+        st.retry_available.connect(panel.discard.setVisible)
+        panel.retry.clicked.connect(lambda: self.stt.retry())
+        panel.discard.clicked.connect(self._discard_recording)
         eb = self.export_bridge
         eb.progress.connect(lambda d, t: w.export_status.setText(f"Exporting {d} of {t}"))
         eb.finished.connect(self._on_export_finished)
@@ -454,12 +462,10 @@ class AppController(QObject):
         start = sentence_start(text, u16_to_py(text, self.editor.textCursor().position()))
         if not text[start:].strip():
             start = 0
-        self.speech.stop()
+        self._stop_speech()
         self.editor.begin_tracking()
         if self.speech.speak(text[start:], Source.EDITOR, py_to_u16(text, start)):
             self._status("Speaking from the cursor...")
-        else:
-            self._status(STILL_STOPPING)
 
     def on_pause_resume(self):
         if self.speech.busy:
@@ -479,8 +485,18 @@ class AppController(QObject):
         else:
             self._status(STILL_STOPPING)
 
+    def _stop_speech(self):
+        """Asks and returns at once: a speech engine can take its time to notice, and the window must
+        not wait for it. Anything asked for next starts by itself once it has."""
+        self.speech.request_stop()
+        QTimer.singleShot(STOP_PATIENCE_MS, self._report_slow_stop)
+
+    def _report_slow_stop(self):
+        if self.speech.stop_overdue(STOP_PATIENCE_MS / 1000):
+            self._status(STILL_STOPPING)
+
     def on_stop(self):
-        self.speech.stop()
+        self._stop_speech()
         self.editor.stop_tracking()
         self._status("Stopped")
 
@@ -634,7 +650,7 @@ class AppController(QObject):
         dlg.voices_changed.connect(self.speech.refresh_voices)
         dlg.use_voice.connect(self._use_clone)
         dlg.hear_voice.connect(self._hear_clone)
-        dlg.recording_started.connect(self.speech.stop)
+        dlg.recording_started.connect(self._stop_speech)
         dlg.destroyed.connect(lambda *_: self._clone_dialog_closed())
         self._clone_dialog = dlg
         dlg.show()
@@ -645,12 +661,11 @@ class AppController(QObject):
 
     def _hear_clone(self, vid):
         """Just a try, of one sentence: the voice in Settings stays as it is until "Use this voice"."""
-        self.speech.stop()
+        self._stop_speech()
         self.speech.set_voice(vid)
         self._hearing_clone = True
         if not self.speech.speak("This is how I sound when I read for you.", Source.TEST):
             self._end_voice_try()
-            self._toast("Still stopping the previous speech. Try again in a moment.")
 
     def _end_voice_try(self):
         if self._hearing_clone:
@@ -660,7 +675,7 @@ class AppController(QObject):
     def _clone_dialog_closed(self):
         self._clone_dialog = None
         if self._hearing_clone:
-            self.speech.stop()
+            self._stop_speech()
             self._end_voice_try()
 
     def _clone_dialog_quit(self):
@@ -681,7 +696,7 @@ class AppController(QObject):
     def _volume_step(self, direction):
         volume = max(0.1, min(1.0, round(self.speech.volume + 0.05 * direction, 2)))
         self._set_volume(volume)
-        self.float_toast.show_near(self.mini, f"Volume {int(round(volume * 100))}%", 900)
+        self.float_toast.show_near(self.mini, f"Volume {round(volume * 100)}%", 900)
 
     def _set_rate(self, wpm):
         self.speech.set_rate(wpm)
@@ -703,7 +718,7 @@ class AppController(QObject):
     def _set_volume(self, volume):
         self.speech.set_volume(volume)
         self.settings.set("tts_volume", round(float(volume), 2))
-        if self.window.transport.volume.value() != int(round(volume * 100)):
+        if self.window.transport.volume.value() != round(volume * 100):
             self.window.transport.set_values(self.speech.rate, volume)
         if self._settings_dialog is not None:
             self._settings_dialog.sync_live_value("tts_volume", round(float(volume), 2))
@@ -825,11 +840,9 @@ class AppController(QObject):
             self._toast("The queue is empty. Add some text first.")
             return
         start = item_id or self.window.queue_panel.selected_id() or ""
-        self.speech.stop()
+        self._stop_speech()
         if self.speech.play_queue(start):
             self._status(f"Playing queue ({len(self.queue)} items)")
-        else:
-            self._status("Still stopping the previous speech. Try again in a moment.")
 
     def _queue_menu(self, item_id, pos):
         from PySide6.QtWidgets import QMenu
@@ -906,7 +919,7 @@ class AppController(QObject):
                                       QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
         if answer == QMessageBox.Yes:
             if self.speech.playing_item_id:
-                self.speech.stop()
+                self._stop_speech()
             self.queue.clear()
             self._status("Queue cleared")
 
@@ -1015,7 +1028,7 @@ class AppController(QObject):
         if self.stt.state is SttState.IDLE:
             self._dictation_target = target
             if self.speech.busy:  # the microphone would hear it, and type what the speakers say
-                self.speech.stop()
+                self._stop_speech()
         self.stt.toggle(target)
 
     def cancel_dictation(self):
@@ -1068,6 +1081,25 @@ class AppController(QObject):
         if hotkeys_follow:
             self._esc_registered = recording and self._caption_wanted()
             self._apply_global_hotkeys()
+
+    def _apply_keep_recording(self, values):
+        folder = os.path.join(plat.data_dir(), RECORDINGS_FOLDER)
+        if values["stt_keep_recording"]:
+            self.stt.spool_folder = folder
+        elif hasattr(self.stt, "stop_keeping_files"):
+            self.stt.stop_keeping_files(folder)
+
+    def _discard_recording(self):
+        if self.stt.discard_kept():
+            self._status("Recording deleted")
+
+    def recover_dictation(self):
+        """Returns a message if the last session left a recording that was never typed."""
+        seconds = self.stt.recover()
+        if not seconds:
+            return None
+        return (f"A dictation of {max(1, round(seconds))} s was not finished last time. "
+                "Press Try again on the Listen page to get its text in the editor, or Discard.")
 
     def copy_last_dictation(self):
         if self._last_dictation:
@@ -1197,7 +1229,7 @@ class AppController(QObject):
     def _stop_reading_editor(self):
         """Speech from the editor would go on over text that has been replaced."""
         if self.speech.busy and self.speech.current_source not in (Source.QUEUE, Source.CLIPBOARD):
-            self.speech.stop()
+            self._stop_speech()
 
     def on_open(self):
         if not self._confirm_discard():
@@ -1238,7 +1270,7 @@ class AppController(QObject):
     def on_new(self):
         if not self._confirm_discard():
             return
-        self.speech.stop()
+        self._stop_speech()
         self.editor.setPlainText("")
         self._forget_document()
         self._status("New document")
@@ -1325,8 +1357,9 @@ class AppController(QObject):
         doc = self.current_doc if self.current_file == path else None
         wanted = doc.encoding if doc else "utf-8"
         try:
-            used = textio.write_text_file(path, _saved_text(self.editor), wanted,
-                                          doc.newline if doc else None, doc.bom if doc else False)
+            text = _saved_text(self.editor)
+            used = textio.write_text_file(path, text, wanted, doc.newline if doc else None, doc.bom if doc else False,
+                                          doc.original if doc else None)
         except (OSError, UnicodeError) as exc:
             QMessageBox.warning(self.window, "Save failed", f"Could not save this file:\n{exc}")
             return
@@ -1335,6 +1368,8 @@ class AppController(QObject):
         else:
             doc.encoding = used
             doc.lossy = False  # the user chose to replace this file
+            if doc.original is not None:
+                doc.original = textio.with_original_endings(text, doc.original, doc.newline)
         self.current_file = path
         self.editor.document().setModified(False)
         self.window.editor_card.set_title(os.path.basename(path))
@@ -1505,11 +1540,10 @@ class AppController(QObject):
         elif name == "test_voice":
             # Uses the unsaved dialog values; Cancel/Close put the engine back (sync_engine).
             values = dict(self.settings.data, **dlg.form_values()) if dlg else self.settings.data
-            self.speech.stop()
+            self._stop_speech()
             self._apply_engine(values)
             self._tested_voice = True
-            if not self.speech.speak("This is how speech will sound.", Source.TEST):
-                self._status(STILL_STOPPING)
+            self.speech.speak("This is how speech will sound.", Source.TEST)
         elif name == "sync_engine":
             if self._tested_voice:  # only a Test changed the engine; otherwise leave speech alone
                 self._tested_voice = False
@@ -1525,10 +1559,8 @@ class AppController(QObject):
             self.mini.restore_position(None)
             self.save_soon()
         elif name == "open_settings_folder":
-            try:
+            with contextlib.suppress(OSError):
                 plat.open_uri(os.path.dirname(self.settings.path))
-            except OSError:
-                pass
 
     def _apply_engine(self, values):
         """Point the speech engine at these voice/speed/volume/device values."""
@@ -1563,6 +1595,7 @@ class AppController(QObject):
         self.stt.set_model(s["stt_whisper_model"])
         self.stt.language = s["stt_language"]
         self.stt.preview_enabled = s["stt_live_preview"]
+        self._apply_keep_recording(s)
         self.stt.configure(unload_when_idle=s["stt_unload_model_when_idle"], auto_unload=s["stt_auto_unload_enabled"],
                            minutes=s["stt_auto_unload_minutes"])
         if old["tts_output_device"] != s["tts_output_device"] or old["stt_input_device"] != s["stt_input_device"]:
@@ -1829,17 +1862,14 @@ class AppController(QObject):
         doc = self.current_doc
         data = {"text": self.editor.toPlainText(), "file": self.current_file,
                 "encoding": doc.encoding if doc else None, "newline": doc.newline if doc else None,
-                "bom": bool(doc.bom) if doc else False, "lossy": bool(doc.lossy) if doc else False}
-        try:
+                "bom": bool(doc.bom) if doc else False, "lossy": bool(doc.lossy) if doc else False,
+                "original": doc.original if doc else None}
+        with contextlib.suppress(OSError):
             write_json_atomic(self._recovery_path(), data)
-        except OSError:
-            pass
 
     def _clear_recovery(self):
-        try:
+        with contextlib.suppress(OSError):
             os.remove(self._recovery_path())
-        except OSError:
-            pass
 
     def restore_recovery(self):
         """Put back text kept at the end of the last session. Returns True if any was restored."""
@@ -1860,7 +1890,8 @@ class AppController(QObject):
             self.current_file = file
             self.current_doc = textio.TextDocument(text, data.get("encoding") or "utf-8",
                                                    data.get("newline") or os.linesep, bool(data.get("bom")),
-                                                   bool(data.get("lossy")))
+                                                   bool(data.get("lossy")),
+                                                   data["original"] if isinstance(data.get("original"), str) else None)
             self.window.editor_card.set_title(os.path.basename(file))
         self.editor.document().setModified(True)
         return True
@@ -1877,15 +1908,14 @@ class AppController(QObject):
             self._clear_recovery()
         if self.window.isVisible():
             self._remember_layout()
-        try:
+        with contextlib.suppress(RuntimeError, TypeError):
             QGuiApplication.clipboard().dataChanged.disconnect(self._on_clipboard)
-        except (RuntimeError, TypeError):
-            pass
         self._clip_poll.stop()
         self._draft_timer.stop()
         if self._queue_save_timer.isActive():
             self._queue_save_timer.stop()
             self._save_queue()
+        self.stt.closing = True
         for bridge in (self.speech_bridge, self.stt_bridge, self.export_bridge):
             bridge.blockSignals(True)
         self.exporter.cancel()
@@ -1899,4 +1929,5 @@ class AppController(QObject):
         self.caption.close()
         if self.tray:
             self.tray.hide()
+        keep_clipboard_after_exit(QGuiApplication.clipboard(), QGuiApplication.platformName())
         self.app.quit()

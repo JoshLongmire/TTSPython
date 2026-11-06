@@ -1,6 +1,7 @@
 """Win32 declarations via ctypes (imported only on Windows)."""
 from __future__ import annotations
 
+import contextlib
 import ctypes
 from ctypes import wintypes
 
@@ -175,10 +176,8 @@ def apply_noactivate(hwnd):
 
 
 def set_app_user_model_id(app_id):
-    try:
+    with contextlib.suppress(Exception):
         shell32.SetCurrentProcessExplicitAppUserModelID(ctypes.c_wchar_p(app_id))
-    except Exception:
-        pass
 
 
 class _PowerThrottlingState(ctypes.Structure):

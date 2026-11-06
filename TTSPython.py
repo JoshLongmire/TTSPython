@@ -21,9 +21,9 @@ def _missing_dependency_hint(exc):
 
 if __name__ == "__main__":
     try:
-        from ttspython.app import main
+        from ttspython.app import run
         import PySide6  # noqa: F401
     except ImportError as exc:
         _missing_dependency_hint(exc)
         sys.exit(1)
-    sys.exit(main())
+    run()

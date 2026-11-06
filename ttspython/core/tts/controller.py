@@ -17,11 +17,14 @@ Events (EventEmitter names and arguments):
 """
 from __future__ import annotations
 
+import contextlib
 import enum
 import gc
 import itertools
+import logging
 import queue
 import threading
+import time
 from dataclasses import dataclass
 
 from ..chunking import split_chunks, utf16_len
@@ -30,6 +33,8 @@ from ..platform import com_apartment
 from ..queue_model import SpeechQueue
 from .player import AudioPlayer, Marker
 from .render import Cancelled, create_renderer, pick_default_voice, trim_leading_silence
+
+log = logging.getLogger(__name__)
 
 LOOKAHEAD_SECONDS = 3.0  # keep this much audio rendered ahead of what is heard...
 LOOKAHEAD_MAX = 5        # ...but never more than this many chunks
@@ -120,6 +125,7 @@ class SpeechController:
         self._restart_pending = False
         self._rerender_timer = None
         self._current_source = None
+        self._stop_asked = None  # when a stop was asked for that the synth thread has not answered yet
 
         self.voice_id = voice_id
         self.rate = int(rate)
@@ -155,20 +161,25 @@ class SpeechController:
         return self._current_source
 
     def speak(self, text, source=Source.EDITOR, base16=0, replace=False):
-        """Speak text. Returns False if busy and replace is False, or text is blank."""
+        """Speak text. Returns False if speaking and replace is False, or text is blank.
+        While the last speech is stopping it is accepted, and starts as soon as that has stopped."""
         if not text or not text.strip():
             return False
         if replace:
-            self.stop()
+            self.request_stop()
         with self._lock:
-            if self._state is not State.IDLE or self._pending_jobs:
+            if not self._free():
                 return False
             self._submit(_Job(kind="single", text=text, source=source, base16=base16))
         return True
 
+    def _free(self):
+        """Stopping counts as free: any job still waiting then belongs to a stopped generation."""
+        return self._state is State.STOPPING or (self._state is State.IDLE and not self._pending_jobs)
+
     def play_queue(self, start_item_id="", manual=True):
         with self._lock:
-            if self._state is not State.IDLE or self._pending_jobs or not len(self.queue):
+            if not self._free() or not len(self.queue):
                 return False
             self._submit(_Job(kind="queue", start_item=start_item_id, manual=manual, source=Source.QUEUE))
         return True
@@ -198,23 +209,34 @@ class SpeechController:
         else:
             self.pause()
 
-    def stop(self, timeout=2.0):
-        """Stop everything and return once the synth thread is idle.
+    def request_stop(self):
+        """Stop everything: it goes quiet now, and this never waits for the synth thread.
 
         Bumping the generation cancels the running job and makes any job still
         waiting in the command queue a no-op when the synth thread reaches it.
         """
         with self._lock:
             if self._state is State.IDLE and not self._pending_jobs:
-                return True
+                return
             self._generation += 1
             self._cancel.set()
             # Anything the stopped job is still about to enqueue is dropped by the player.
             self.player.flush(min_generation=self._generation)
             self.player.resume()
             self._set_state(State.STOPPING)
+            if self._stop_asked is None:
+                self._stop_asked = time.monotonic()
             self._cond.notify_all()
+
+    def stop(self, timeout=2.0):
+        """request_stop, then wait for the synth thread. Not for the window's thread."""
+        self.request_stop()
         return self._idle.wait(timeout)
+
+    def stop_overdue(self, seconds):
+        """Has a stop gone unanswered for this long? (a speech engine that is stuck)"""
+        asked = self._stop_asked
+        return asked is not None and time.monotonic() - asked >= seconds
 
     def set_voice(self, voice_id):
         """While speaking, the new voice takes over from the start of the word being heard."""
@@ -223,7 +245,7 @@ class SpeechController:
             return
         self.voice_id = voice_id
         with self._lock:
-            if self._state is not State.IDLE:
+            if self._state not in (State.IDLE, State.STOPPING):
                 self._restart_pending = True
                 self._cond.notify_all()
 
@@ -252,7 +274,7 @@ class SpeechController:
         if index == self.player.device:
             return
         if self.busy:
-            self.stop()
+            self.request_stop()
         self.player.set_device(index)
 
     def refresh_voices(self):
@@ -316,18 +338,16 @@ class SpeechController:
 
     def _warm_up(self, renderer):
         """Pay one-time costs now (PortAudio init, first SAPI render), not on first Speak."""
-        try:
+        with contextlib.suppress(Exception):
             _ = self.player.sd
-        except Exception:
-            pass
         if renderer is not None:
             try:
                 if hasattr(renderer, "warm_up"):
                     renderer.warm_up(self.rate)
                 else:
                     renderer.render("a", self.voice_id, self.rate, threading.Event())
-            except Exception:
-                pass
+            except Exception:  # only a warm-up: speaking reports it, if it still fails then
+                log.debug("The speech engine's warm-up failed", exc_info=True)
 
     def _load_voices(self, renderer):
         self.voices = renderer.list_voices()
@@ -341,6 +361,7 @@ class SpeechController:
             if not skip:
                 self._cancel.clear()
             self._params_dirty = False
+            self._restart_pending = False  # this job reads the voice for itself
             generation = self._generation
         stopped = False
         try:
@@ -370,8 +391,9 @@ class SpeechController:
             with self._lock:
                 self.playing_item_id = ""
                 self._current_source = None
-                self.player.resume()
+                self._stop_asked = None
                 if self._pending_jobs == 0:
+                    self.player.resume()
                     self._set_state(State.IDLE)
                     self._idle.set()
 

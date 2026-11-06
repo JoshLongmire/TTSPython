@@ -17,6 +17,40 @@ class TextDocument:
     newline: str         # "\r\n" or "\n" as found in the file
     bom: bool = False
     lossy: bool = False  # not read correctly (see _looks_misread): saving over the file would destroy it
+    original: str | None = None  # the file's text with its line endings, when they are not all the same
+
+
+_LINE_END = re.compile(r"\r\n|\n|\r")
+
+
+def with_original_endings(text, original, newline):
+    """text ("\\n" endings) with the line endings of original wherever a line is unchanged. Only the
+    lines between the first and the last change get newline, so a file with mixed endings does not
+    become a change to every line of it."""
+    old = _LINE_END.split(original)
+    ends = _LINE_END.findall(original)
+    new = text.split("\n")
+    if len(old) == len(new):  # no line was added or removed: each keeps its own, edited or not
+        return "".join(part for pair in zip(new, [*ends, ""]) for part in pair)
+    limit = min(len(old), len(new))
+    head = 0
+    while head < limit and old[head] == new[head]:
+        head += 1
+    tail = 0
+    while tail < limit - head and old[-1 - tail] == new[-1 - tail]:
+        tail += 1
+    shift = len(old) - len(new)
+    parts = []
+    for i, line in enumerate(new[:-1]):
+        parts.append(line)
+        if i < head and i < len(ends):
+            parts.append(ends[i])
+        elif i >= len(new) - tail:
+            parts.append(ends[i + shift])
+        else:
+            parts.append(newline)
+    parts.append(new[-1])
+    return "".join(parts)
 
 
 def _detect_newline(text):
@@ -72,8 +106,9 @@ def decode_text(raw: bytes) -> TextDocument:
     if not bom and b"\x00" in raw:  # text has no such byte: UTF-16 or UTF-32 without a mark, or not text at all
         lossy = True
     newline = _detect_newline(text)
+    original = text if len(set(_LINE_END.findall(text))) > 1 else None
     text = text.replace("\r\n", "\n")
-    return TextDocument(text=text, encoding=enc, newline=newline, bom=bom, lossy=lossy)
+    return TextDocument(text=text, encoding=enc, newline=newline, bom=bom, lossy=lossy, original=original)
 
 
 def read_text_file(path) -> TextDocument:
@@ -85,12 +120,15 @@ def read_text(path) -> str:
     return read_text_file(path).text
 
 
-def encode_text(text, encoding="utf-8", newline=None, bom=False):
-    """Return (bytes, encoding actually used). Falls back to UTF-8 if the text does not fit."""
+def encode_text(text, encoding="utf-8", newline=None, bom=False, original=None):
+    """Return (bytes, encoding actually used). Falls back to UTF-8 if the text does not fit.
+    original: the file's text, when its line endings were mixed (see with_original_endings)."""
     newline = newline or os.linesep
     # A broken character (half of a pair, from damaged clipboard data) cannot be stored in any encoding.
     body = _LONE_SURROGATE.sub("\ufffd", text).replace("\r\n", "\n")
-    if newline != "\n":
+    if original is not None:
+        body = with_original_endings(body, original, newline)
+    elif newline != "\n":
         body = body.replace("\n", newline)
     try:
         data = body.encode(encoding)
@@ -102,12 +140,12 @@ def encode_text(text, encoding="utf-8", newline=None, bom=False):
     return data, encoding
 
 
-def write_text_file(path, text, encoding="utf-8", newline=None, bom=False):
+def write_text_file(path, text, encoding="utf-8", newline=None, bom=False, original=None):
     """Write exactly the editor text (no extra trailing newline), atomically.
 
     Returns the encoding used, which is UTF-8 if the text cannot be stored in `encoding`.
     """
-    data, used = encode_text(text, encoding, newline, bom)
+    data, used = encode_text(text, encoding, newline, bom, original)
     if os.path.exists(path) and not os.access(path, os.W_OK):
         raise PermissionError("This file is read-only. Use Save as to keep your text in another file.")
     if os.path.islink(path):

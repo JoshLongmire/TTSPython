@@ -36,14 +36,14 @@ def stretch(x, factor, rate):
     tol = max(1, int(rate * SEARCH_SECONDS))
     step = 2 if rate >= 16000 else 1  # the alignment search runs on every 2nd sample
     win = _window(n)
-    out_len = int(round(x.size / factor))
+    out_len = round(x.size / factor)
     out = np.zeros(out_len + 2 * n, dtype=np.float32)
     weight = np.zeros_like(out)
     pad = np.concatenate([np.zeros(tol, np.float32), x, np.zeros(2 * n + 2 * tol, np.float32)])
     prev = None
     k = 0
     while True:
-        ideal = int(round(k * ha))
+        ideal = round(k * ha)
         pos = k * hs
         if ideal >= x.size or pos >= out_len:
             break
@@ -138,7 +138,7 @@ class Stretcher:
         return out
 
     def _enough_for_a_hop(self):
-        reach = int(round(self.pos)) + self.tol + self.n
+        reach = round(self.pos) + self.tol + self.n
         if self.prev is not None:
             reach = max(reach, self.prev + self.hs + self.n)
         return reach <= self.x.size
@@ -157,7 +157,7 @@ class Stretcher:
             self._ended = True
             return self.tail  # fade out the last frame
         if self.prev is None:
-            start = int(round(self.pos))
+            start = round(self.pos)
             frame = self._frame(start)
             # The very first half frame plays as is.
             out = frame[:hs] * win[:hs] if self._fade_in else frame[:hs].copy()
@@ -168,7 +168,7 @@ class Stretcher:
                 start = natural
             else:
                 tol, step = self.tol, self.step
-                ideal = int(round(self.pos))
+                ideal = round(self.pos)
                 ref = self._region(natural, n)[::step]
                 region = self._region(ideal - tol, n + 2 * tol)[::step]
                 corr = np.correlate(region, ref, mode="valid")

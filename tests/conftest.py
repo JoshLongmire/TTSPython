@@ -57,6 +57,14 @@ def v4_settings_file(tmp_path):
 
 
 @pytest.fixture(autouse=True)
+def fake_downloads_are_not_checked(monkeypatch):
+    """Tests that fake a Whisper download have no real files to check. Those about the check set this themselves."""
+    from ttspython.core.stt import service
+
+    monkeypatch.setattr(service, "_digests_for", lambda _name: None)
+
+
+@pytest.fixture(autouse=True)
 def no_preview_download(monkeypatch):
     """The instant preview's model is never downloaded in tests (tests that use the preview
     give the service a fake one)."""

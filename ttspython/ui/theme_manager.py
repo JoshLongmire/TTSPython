@@ -8,7 +8,7 @@ import tempfile
 from PySide6.QtCore import QObject, Signal
 from PySide6.QtWidgets import QApplication
 
-from ..core.theme import THEME_PRESETS, DEFAULT_THEME, derive_tokens
+from ..core.theme import DEFAULT_THEME, THEME_PRESETS, derive_tokens
 from . import icons
 from .style import build_palette, build_qss, ui_font
 

@@ -5,7 +5,7 @@ from string import Template
 
 from PySide6.QtGui import QColor, QFont, QFontDatabase, QPalette
 
-from ..core.platform import IS_WINDOWS, IS_DARWIN
+from ..core.platform import IS_DARWIN, IS_WINDOWS
 from ..core.theme import darken
 
 UI_FONT_CANDIDATES = (

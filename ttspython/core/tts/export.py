@@ -1,6 +1,7 @@
 """Export speech to WAV or MP3 on a background thread."""
 from __future__ import annotations
 
+import contextlib
 import gc
 import os
 import threading
@@ -15,6 +16,7 @@ from ..resample import resample
 from ..settings import atomic_replace
 from .render import Cancelled, create_renderer
 from .stretch import speed_factor, stretch
+
 
 def mp3_available():
     try:
@@ -153,15 +155,11 @@ class AudioExporter:
 
     def _abort(self, writer, path):
         if writer is not None:
-            try:
+            with contextlib.suppress(Exception):
                 writer.close()
-            except Exception:
-                pass
         self._cleanup(path)
 
     @staticmethod
     def _cleanup(path):
-        try:
+        with contextlib.suppress(OSError):
             os.remove(path + ".part")
-        except OSError:
-            pass

@@ -3,10 +3,17 @@ from __future__ import annotations
 
 import re
 
-from PySide6.QtCore import QEvent, Qt, Signal, QTimer
+from PySide6.QtCore import QEvent, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFont, QTextCharFormat, QTextCursor, QTextFormat
 from PySide6.QtWidgets import (
-    QFrame, QHBoxLayout, QLabel, QLineEdit, QPlainTextEdit, QTextEdit, QVBoxLayout, QWidget,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QPlainTextEdit,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
 )
 
 from ..core import search
@@ -14,7 +21,6 @@ from ..core.chunking import utf16_len
 from . import icons
 from .style import EDITOR_FONT_CANDIDATES, pick_family
 from .widgets import ElidedLabel, TextFileDropMixin, action_button, mute_clear_button, tool_button
-
 
 _SENTENCE_END = re.compile(r"[.!?…]+[\"'”’)\]]*\s+|\n\s*")
 
@@ -70,6 +76,8 @@ class SpeechTextEdit(TextFileDropMixin, QPlainTextEdit):
         self.setPlaceholderText("Type or paste text here, then press Play (Ctrl+Enter). Press it again to pause.")
         self.setFrameShape(QFrame.NoFrame)
         self.document().setDocumentMargin(14)
+        self.document().setModified(False)  # setting the margin counts as a change: a new document showed as unsaved
+        self.setAccessibleName("Text to read")
         self._sentence = None
         self._sentence_color = QColor("#333")
         self._highlight_enabled = True
@@ -199,6 +207,7 @@ class FindBar(QFrame):
         row1.setSpacing(6)
         self.find_edit = QLineEdit()
         self.find_edit.setPlaceholderText("Find")
+        self.find_edit.setAccessibleName("Find")
         self.find_edit.setClearButtonEnabled(True)
         mute_clear_button(self.find_edit)
         self.case_btn = tool_button("case", "Match case", checkable=True)
@@ -217,6 +226,7 @@ class FindBar(QFrame):
         row2.setSpacing(6)
         self.replace_edit = QLineEdit()
         self.replace_edit.setPlaceholderText("Replace with")
+        self.replace_edit.setAccessibleName("Replace with")
         self.replace_btn = tool_button("replace", "Replace this match", variant="ghost", text="Replace")
         self.replace_all_btn = tool_button("replace_all", "Replace every match", variant="ghost", text="Replace all")
         row2.addWidget(self.replace_edit, 1)

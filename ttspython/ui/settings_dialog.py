@@ -1,23 +1,50 @@
 """Settings: side navigation with one page per area."""
 from __future__ import annotations
 
+import contextlib
 import copy
 import sys
 
 from PySide6.QtCore import QEvent, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QKeySequence, QPainter
 from PySide6.QtWidgets import (
-    QAbstractButton, QButtonGroup, QComboBox, QDialog, QFrame, QGridLayout, QHBoxLayout, QKeySequenceEdit, QLabel, QLineEdit,
-    QListWidget, QListWidgetItem, QMessageBox, QPushButton, QRadioButton, QScrollArea,
-    QSpinBox, QStackedWidget, QVBoxLayout, QWidget,
+    QAbstractButton,
+    QButtonGroup,
+    QComboBox,
+    QDialog,
+    QFrame,
+    QGridLayout,
+    QHBoxLayout,
+    QKeySequenceEdit,
+    QLabel,
+    QLineEdit,
+    QListWidget,
+    QListWidgetItem,
+    QMessageBox,
+    QPushButton,
+    QRadioButton,
+    QScrollArea,
+    QSpinBox,
+    QStackedWidget,
+    QVBoxLayout,
+    QWidget,
 )
 
-from ..core import keys, settings as settings_mod
+from ..core import keys
+from ..core import settings as settings_mod
 from ..core.stt import preview as preview_mod
 from ..core.theme import THEME_PRESETS, derive_tokens
 from . import icons
 from .widgets import (
-    ElidedLabel, ElidingComboBox, Segmented, Slider, ToggleSwitch, Waveform, mute_clear_button, tool_button, voice_label,
+    ElidedLabel,
+    ElidingComboBox,
+    Segmented,
+    Slider,
+    ToggleSwitch,
+    Waveform,
+    mute_clear_button,
+    tool_button,
+    voice_label,
 )
 
 
@@ -225,11 +252,9 @@ class MicMeter(Waveform):
 
     def stop(self):
         if self._stream is not None:
-            try:
+            with contextlib.suppress(Exception):
                 self._stream.stop()
                 self._stream.close()
-            except Exception:
-                pass
         self._stream = None
         self.set_source(None)
 
@@ -260,6 +285,7 @@ class SettingsDialog(QDialog):
         root.setSpacing(0)
         self.nav = QListWidget()
         self.nav.setObjectName("Nav")
+        self.nav.setAccessibleName("Settings pages")
         self.nav.setFixedWidth(172)
         self.nav.setIconSize(QSize(18, 18))
         self.stack = QStackedWidget()
@@ -474,6 +500,10 @@ class SettingsDialog(QDialog):
                   "and Whisper corrects it. English, French and Chinese. "
                   f"Downloads up to {max(preview_mod.download_mb(lang) for lang in preview_mod.MODELS)} MB "
                   "the first time, for each language.")
+        self.keep_recording = ToggleSwitch()
+        self._row(lay, "Keep the recording until it is typed", self.keep_recording,
+                  "While you dictate, the sound also goes to a file on this computer, so that a crash or a power cut "
+                  "cannot lose it. It is deleted as soon as the text is delivered. Off: in memory only.")
         self._section(lay, "Memory")
         self.unload_idle = ToggleSwitch()
         self._row(lay, "Unload the model after each dictation", self.unload_idle, "Frees RAM right away.")
@@ -648,7 +678,7 @@ class SettingsDialog(QDialog):
             slider.blockSignals(True)
         self.rate.setValue(settings_mod.speed_percent(v["tts_rate"]))
         self.rate_label.setText(f"{self.rate.value()}%")
-        self.volume.setValue(int(round(v["tts_volume"] * 100)))
+        self.volume.setValue(round(v["tts_volume"] * 100))
         self.volume_label.setText(f"{self.volume.value()}%")
         for slider in (self.rate, self.volume):
             slider.blockSignals(False)
@@ -664,6 +694,7 @@ class SettingsDialog(QDialog):
         self.update_model_status()
         self.language.setCurrentIndex(max(0, self.language.findData(v["stt_language"])))
         self.live_preview.setChecked(v["stt_live_preview"])
+        self.keep_recording.setChecked(v["stt_keep_recording"])
         self.unload_idle.setChecked(v["stt_unload_model_when_idle"])
         self.auto_unload.setChecked(v["stt_auto_unload_enabled"])
         self.auto_unload_minutes.setValue(v["stt_auto_unload_minutes"])
@@ -731,6 +762,7 @@ class SettingsDialog(QDialog):
         v["stt_whisper_model"] = self.model.currentData()
         v["stt_language"] = self.language.currentData()
         v["stt_live_preview"] = self.live_preview.isChecked()
+        v["stt_keep_recording"] = self.keep_recording.isChecked()
         v["stt_unload_model_when_idle"] = self.unload_idle.isChecked()
         v["stt_auto_unload_enabled"] = self.auto_unload.isChecked()
         v["stt_auto_unload_minutes"] = self.auto_unload_minutes.value()
@@ -894,7 +926,7 @@ class SettingsDialog(QDialog):
         if key == "tts_rate":
             slider, label, shown = self.rate, self.rate_label, settings_mod.speed_percent(value)
         else:
-            slider, label, shown = self.volume, self.volume_label, int(round(value * 100))
+            slider, label, shown = self.volume, self.volume_label, round(value * 100)
         slider.blockSignals(True)
         slider.setValue(shown)
         slider.blockSignals(False)

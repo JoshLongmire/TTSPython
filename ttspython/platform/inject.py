@@ -5,6 +5,7 @@ previous clipboard is restored afterwards unless something else changed it.
 """
 from __future__ import annotations
 
+import contextlib
 import shutil
 import subprocess
 
@@ -40,6 +41,22 @@ def _private_text(text):
         for fmt, value in WIN_PRIVATE_FORMATS.items():
             data.setData(fmt, value)
     return data
+
+
+def keep_clipboard_after_exit(clipboard, platform_name, flush=None):
+    """What this app put on the clipboard is only promised, and is made when something pastes it.
+    Without this, it would be gone when the app quits. True if it was handed over."""
+    if platform_name != "windows" or not clipboard.ownsClipboard():
+        return False
+    try:
+        if flush is None:
+            import ctypes
+
+            flush = ctypes.windll.ole32.OleFlushClipboard
+        flush()
+    except Exception:
+        return False
+    return True
 
 
 def snapshot_clipboard(clipboard):
@@ -169,10 +186,8 @@ class TextInjector(QObject):
                 # A stop hotkey may still be held: Ctrl+Alt+V would be another command.
                 held = (Key.alt, Key.alt_gr, Key.cmd) + (() if self.keystroke == "shift+insert" else (Key.shift,))
                 for key in held:
-                    try:
+                    with contextlib.suppress(Exception):
                         kb.release(key)
-                    except Exception:
-                        pass
                 if self.keystroke == "shift+insert":
                     with kb.pressed(Key.shift):
                         kb.tap(Key.insert)

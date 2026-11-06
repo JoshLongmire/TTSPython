@@ -1,6 +1,38 @@
 # Changelog - TTSPython
 
 ## Unreleased
+
+## Version 5.1.0 - 2026-11-06
+- A crash or a power cut can no longer lose a dictation. The sound goes to a file on your computer as you speak (at most about the
+  last second is missing after a power cut), and is deleted as soon as the text is delivered. At the next start, **Try again** on the
+  Listen page puts the text in the editor, and **Discard** deletes the recording. In a real test, a process killed in the middle of
+  10.9 seconds of speech got all 34 words back. It costs under 0.1% of one processor core. To keep recordings in memory only, turn
+  off **Settings > Listen > Keep the recording until it is typed**.
+- A recording kept for **Try again** now stays when you quit, until you use or discard it, or start a new dictation.
+- Stop is instant, and the window no longer waits for it. Before, Stop could hold up the whole window for up to 2 seconds when a speech
+  engine was slow to notice; now the button returns in 0.07 ms at worst (99 ms before on the same test, and up to 2 seconds with
+  a slow engine). Pressing Play right after Stop starts the new speech by itself, instead of asking you to try again.
+- Stopping a very long dictation no longer holds up the window: half an hour on a 48 kHz microphone took 2.4 seconds there, and that
+  work now happens in the background.
+- Files with mixed line endings stay as they were. Before, saving turned all of them into one kind, which showed up as a change to
+  every line in other programs. Only lines you add or remove take the file's most common ending.
+- A Whisper model download is now checked file by file against what its version holds. A damaged one is removed and you are asked to
+  try again, instead of failing later in a confusing way. The check takes under 2 seconds even for the largest model.
+- Your own voice: one long, babbled sentence no longer changes the speed of the sentences after it (on the voice model, one such
+  sentence moved the pace by 45 words a minute; now 0). Three in a row still count, in case the voice really is different.
+- Your own voice has to be made with a microphone: an input that records what the computer itself plays (Stereo Mix, a virtual cable)
+  is refused.
+- What you copied with TTSPython now stays on the clipboard after you quit.
+- Quitting right after something was copied can no longer end in a crash: on the test platform that crashed 3 of 3 times, and now 0 of 3.
+- Another person signed in to the same Windows PC can no longer stop TTSPython from starting, or receive its commands, by taking
+  its name first. On Linux, the name now lives in a folder only you can open.
+- Screen readers: the main text box, Find, Replace, the queue list, the Settings pages and the clear buttons now have names. Read from
+  the real window from outside, as a screen reader does, 32 of 33 controls on screen had a name, and the main text box did not.
+- A new, empty document no longer shows as unsaved in the title bar.
+- `crash.log` now only ever holds real crashes. Harmless errors, such as the one a screen reader's question can cause, were written
+  there as "fatal", and the file could keep growing.
+- Releases are built from packages locked by the hash of every file, and with exactly the Inno Setup version the installer was tested
+  with. A release is now stopped by the test suite on Windows, or by a part of the built app that does not load.
 - Dictation is harder to lose. If a recording cannot be transcribed (the model would not load, or a pass failed), the
   text already final is typed and the recording is kept, with a **Try again** button on the Listen page. If a paste lands
   nowhere, **Copy last dictation** in the tray menu brings it back (it is in memory only, and gone when you quit). If the

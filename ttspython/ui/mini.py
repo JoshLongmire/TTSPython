@@ -4,7 +4,12 @@ from __future__ import annotations
 from PySide6.QtCore import QPoint, QRect, QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QFontMetrics, QGuiApplication, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import (
-    QFrame, QHBoxLayout, QLabel, QToolButton, QVBoxLayout, QWidget,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QToolButton,
+    QVBoxLayout,
+    QWidget,
 )
 
 from ..core.platform import IS_WINDOWS
@@ -526,6 +531,7 @@ class QuickPopover(QFrame):
 
         lay.addWidget(section("Voice"))
         self.voice = ElidingComboBox(chars=16)
+        self.voice.setAccessibleName("Voice")
         lay.addWidget(self.voice)
         lay.addWidget(section("Speed"))
         row = QHBoxLayout()
@@ -595,7 +601,7 @@ class QuickPopover(QFrame):
         self.voice.setCurrentIndex(max(0, self.voice.findData(voice_id)))
         self.rate.setValue(speed_percent(rate))
         self.rate_label.setText(f"{speed_percent(rate)}%")
-        self.volume.setValue(int(round(volume * 100)))
+        self.volume.setValue(round(volume * 100))
         self.volume_label.setText(f"{self.volume.value()}%")
         for w in (self.voice, self.rate, self.volume):
             w.blockSignals(False)

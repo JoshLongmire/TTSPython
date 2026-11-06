@@ -1,6 +1,7 @@
 """Settings: defaults, validation, v4 migration and atomic persistence."""
 from __future__ import annotations
 
+import contextlib
 import copy
 import json
 import os
@@ -13,7 +14,7 @@ from datetime import datetime
 
 from . import keys
 from .platform import config_dir
-from .theme import THEME_PRESETS, DEFAULT_THEME
+from .theme import DEFAULT_THEME, THEME_PRESETS
 
 SETTINGS_VERSION = 5
 SETTINGS_ENV = "TTSPYTHON_SETTINGS"
@@ -65,6 +66,7 @@ DEFAULTS = {
     "stt_auto_unload_enabled": True,
     "stt_auto_unload_minutes": 3,
     "stt_live_preview": True,
+    "stt_keep_recording": True,
     "hotkey_conflicts_seen": [],  # "action=keys" already reported as taken by another app (told once)
     "tts_voice_id": "",
     "tts_rate": 200,
@@ -95,11 +97,11 @@ NORMAL_WPM = 200                # shown as 100%
 
 def speed_percent(wpm):
     """Speed as shown in the app: 200 words per minute is 100%."""
-    return int(round(float(wpm) * 100 / NORMAL_WPM))
+    return round(float(wpm) * 100 / NORMAL_WPM)
 
 
 def percent_wpm(percent):
-    return int(round(float(percent) * NORMAL_WPM / 100))
+    return round(float(percent) * NORMAL_WPM / 100)
 VOLUME_MIN, VOLUME_MAX = 0.1, 1.0
 
 _LEGACY_KEYS = ("hotkeys", "geometry", "dark_mode", "stt_engine")
@@ -243,7 +245,7 @@ def normalize(raw) -> dict:
     for key in ("performance_mode", "clipboard_monitor", "clipboard_auto_queue",
                 "stt_unload_model_when_idle", "stt_auto_unload_enabled", "sentence_highlight",
                 "queue_loop", "queue_panel_visible", "global_hotkeys_enabled", "close_to_tray",
-                "mini_snap", "mini_waveform", "stt_live_preview", "tray_notice_shown"):
+                "mini_snap", "mini_waveform", "stt_live_preview", "stt_keep_recording", "tray_notice_shown"):
         out[key] = _as_bool(raw.get(key, d[key]), d[key])
 
     out["mode"] = raw.get("mode") if raw.get("mode") in ("tts", "stt") else d["mode"]
@@ -301,10 +303,8 @@ def atomic_replace(src, dst, may_copy=True):
     except OSError:
         pass
     if os.name == "nt":  # clears the read-only flag; on Linux it would open a private file to everyone
-        try:
+        with contextlib.suppress(OSError):
             os.chmod(dst, 0o666)
-        except OSError:
-            pass
     time.sleep(_HELD_FILE_WAIT)  # a sync tool or antivirus holding it for a moment
     try:
         os.replace(src, dst)
@@ -313,10 +313,8 @@ def atomic_replace(src, dst, may_copy=True):
         if not may_copy:
             raise
     shutil.copyfile(src, dst)  # if this fails, src stays: it may be the only whole copy left
-    try:
+    with contextlib.suppress(OSError):
         os.remove(src)
-    except OSError:
-        pass
 
 
 _HELD_FILE_WAIT = 0.15
@@ -362,10 +360,8 @@ def _prune_broken_copies(folder, keep=KEEP_BROKEN_COPIES):
     except OSError:
         return
     for name in names[:-keep]:  # timestamped names sort oldest first
-        try:
+        with contextlib.suppress(OSError):
             os.remove(os.path.join(folder, name))
-        except OSError:
-            pass
 
 
 def load(path=None, legacy=None):

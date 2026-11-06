@@ -11,6 +11,7 @@ microphone, with fresh code words in it (see new_consent and check_consent).
 """
 from __future__ import annotations
 
+import contextlib
 import difflib
 import json
 import os
@@ -75,6 +76,8 @@ FALLBACK_WPM = 180  # until a voice has spoken something long enough to measure
 _MEASURE_MIN_WORDS = 5
 _NATIVE_RANGE = (110, 280)
 _PACE_SAVE_CHANGE = 0.05
+_PACE_ODD = 0.25    # a sentence this far from the voice's pace is babble from the model, not its pace...
+_PACE_ODD_RUN = 3   # ...unless this many in a row say so: then the voice really is different
 
 MIN_SECONDS, MAX_SECONDS = 6, 40
 _LIMIT_MARGIN_SECONDS = 2  # the window stops by itself at MAX_SECONDS, and its timer runs a little behind
@@ -152,10 +155,8 @@ def _folder_size(folder):
     total = 0
     for root, _dirs, names in os.walk(folder):
         for name in names:
-            try:
+            with contextlib.suppress(OSError):
                 total += os.path.getsize(os.path.join(root, name))
-            except OSError:
-                pass
     return total
 
 
@@ -703,6 +704,7 @@ class CloneRenderer:
         self._engine_factory = engine_factory  # for tests: the model is loaded and shared otherwise
         self._codes = {}
         self._native = {}  # voice id -> words per minute of its last long enough sentence
+        self._odd_paces = {}  # voice id -> how many sentences in a row were far from that
 
     def list_voices(self):
         return installed_voices()
@@ -733,6 +735,11 @@ class CloneRenderer:
             return
         before = self._native.get(voice_id)
         if smooth and before:  # it applies to the next sentence: one odd sentence should not swing it
+            if abs(pace - before) > before * _PACE_ODD:
+                self._odd_paces[voice_id] = self._odd_paces.get(voice_id, 0) + 1
+                if self._odd_paces[voice_id] < _PACE_ODD_RUN:
+                    return
+            self._odd_paces[voice_id] = 0
             pace = (before + pace) / 2
         self._native[voice_id] = pace
         if abs(pace - (_saved_pace(voice_id) or 0)) > pace * _PACE_SAVE_CHANGE:

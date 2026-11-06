@@ -74,7 +74,7 @@ def pixmap(name, color, size=18, dpr=1.0, width=1.8):
     pm = _cache.get(key)
     if pm is None:
         renderer = QSvgRenderer(QByteArray(svg(name, color, width).encode("utf-8")))
-        px = max(1, int(round(size * dpr)))
+        px = max(1, round(size * dpr))
         pm = QPixmap(px, px)
         pm.fill(Qt.transparent)
         painter = QPainter(pm)

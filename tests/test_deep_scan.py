@@ -86,9 +86,10 @@ def test_one_odd_sentence_does_not_swing_the_pace(voice):  # noqa: F811
     r = clone.CloneRenderer(lambda: Blocks((2.0, 2.0)))
     text = "One two three four five six seven eight nine ten."
     list(r.stream(text, voice, 200, threading.Event()))
+    before = r.native_wpm(200, voice)
     r._engine_factory = lambda: Blocks((1.0, 1.0))
     list(r.stream(text, voice, 200, threading.Event()))
-    assert 150 < r.native_wpm(200, voice) < 300
+    assert r.native_wpm(200, voice) == before
 
 
 def test_the_speed_check_tells_the_pace_of_a_new_voice(voice, monkeypatch):  # noqa: F811
@@ -603,7 +604,7 @@ def test_the_tray_offers_the_last_dictation():
 def test_dictating_stops_speech_wherever_the_text_goes(c, monkeypatch):
     stopped = []
     monkeypatch.setattr(type(c.speech), "busy", property(lambda _self: True))
-    monkeypatch.setattr(c.speech, "stop", lambda *a, **k: stopped.append(1))
+    monkeypatch.setattr(c.speech, "request_stop", lambda *a, **k: stopped.append(1))
     monkeypatch.setattr(c.stt, "toggle", lambda target=None: None)
     c.toggle_dictation(("external", 5))
     assert stopped  # the microphone would hear the speakers and type what they say
@@ -851,13 +852,16 @@ def test_the_editor_hint_shows_the_key_in_use(c):
     assert "Ctrl+Enter" not in c.editor.placeholderText()
 
 
-def test_speaking_from_the_cursor_says_so_when_it_cannot_start(c, monkeypatch):
-    c.editor.setPlainText("Some text to read.")
-    monkeypatch.setattr(c.speech, "stop", lambda *a, **k: False)
-    monkeypatch.setattr(c.speech, "speak", lambda *a, **k: False)
-    c.settings.set("mode", "tts")
-    c.on_speak_from_cursor()
-    assert "Try again" in c.window.status_label.text()
+def test_a_stop_that_takes_long_is_reported(c, monkeypatch):
+    monkeypatch.setattr(c.speech, "stop_overdue", lambda _s: True)
+    c._report_slow_stop()
+    assert "Still stopping" in c.window.status_label.text()
+
+
+def test_a_stop_that_was_quick_is_not_mentioned(c, monkeypatch):
+    monkeypatch.setattr(c.speech, "stop_overdue", lambda _s: False)
+    c._report_slow_stop()
+    assert "Still stopping" not in c.window.status_label.text()
 
 
 def test_distil_says_it_only_knows_english(c):

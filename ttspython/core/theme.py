@@ -4,7 +4,7 @@ from __future__ import annotations
 
 # --- Color helpers -------------------------------------------------------------
 def _clamp_channel(value):
-    return max(0, min(255, int(round(value))))
+    return max(0, min(255, round(value)))
 
 
 def hex_to_rgb(color):

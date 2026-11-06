@@ -38,7 +38,7 @@ Things to know:
 **Settings > Speech > Get more voices > Make my voice** copies your voice, on your computer:
 
 1. Download the voice model once (762 MB).
-2. Press **Start recording**, read the statement on screen out loud, then press **Stop recording** (6 to 40 seconds).
+2. Press **Start recording**, read the statement on screen out loud, then press **Stop recording** (6 to 40 seconds). It has to be a microphone: an input that records what the computer plays (Stereo Mix, a virtual cable) is refused.
 3. Press **Hear it**, then **Use this voice**.
 
 The statement has three code words that change on every try, and the recording has to say them and little else, and

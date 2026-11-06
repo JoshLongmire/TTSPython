@@ -769,7 +769,8 @@ def test_only_the_release_step_can_write_to_the_repo():
     assert flow["permissions"] == {"contents": "read"}
     assert "permissions" not in flow["jobs"]["build"]
     assert flow["jobs"]["release"]["permissions"] == {"contents": "write"}
-    assert flow["jobs"]["release"]["needs"] == "build"
+    assert "build" in flow["jobs"]["release"]["needs"]
+    assert "permissions" not in flow["jobs"]["test"]
     checkout = next(s for s in flow["jobs"]["build"]["steps"] if "checkout" in s.get("uses", ""))
     assert checkout["with"]["persist-credentials"] is False
 

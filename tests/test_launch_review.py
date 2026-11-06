@@ -272,7 +272,7 @@ def test_opening_a_file_stops_reading_the_old_one(c, tmp_path, monkeypatch):
     with monkeypatch.context() as m:
         m.setattr(type(c.speech), "busy", property(lambda _s: True))
         m.setattr(type(c.speech), "current_source", property(lambda _s: Source.EDITOR))
-        m.setattr(c.speech, "stop", lambda: stopped.append(True))
+        m.setattr(c.speech, "request_stop", lambda: stopped.append(True))
         c.open_path(str(path), confirmed=True)
     assert stopped == [True]
 

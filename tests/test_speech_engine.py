@@ -202,8 +202,8 @@ def test_same_output_device_does_not_interrupt_speech(rig):
     rig.ctl.set_output_device(None)  # unchanged: keep speaking
     assert rig.ctl.state is State.PLAYING
     rig.ctl.set_output_device(4)  # changed: the stream must reopen
-    assert rig.ctl.state is State.IDLE
     assert rig.player.device == 4
+    assert wait_for(lambda: rig.ctl.state is State.IDLE)
 
 
 def test_output_device_is_used_and_rate_fallback():

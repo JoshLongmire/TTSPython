@@ -4,11 +4,22 @@ from __future__ import annotations
 import collections
 import os
 
-from PySide6.QtCore import QEasingCurve, QEvent, QPoint, QPointF, QPropertyAnimation, QRectF, QSize, Qt, QTimer, Property, Signal
+from PySide6.QtCore import Property, QEasingCurve, QEvent, QPoint, QPointF, QPropertyAnimation, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QColor, QFont, QFontMetrics, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import (
-    QAbstractButton, QButtonGroup, QComboBox, QFrame, QHBoxLayout, QLabel, QSizePolicy, QSlider, QStyle,
-    QStyleOptionComboBox, QStylePainter, QToolButton, QWidget,
+    QAbstractButton,
+    QButtonGroup,
+    QComboBox,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QSizePolicy,
+    QSlider,
+    QStyle,
+    QStyleOptionComboBox,
+    QStylePainter,
+    QToolButton,
+    QWidget,
 )
 
 from . import icons
@@ -55,6 +66,8 @@ def mute_clear_button(line_edit):
     line_edit._clear_actions = line_edit.findChildren(QAction)
     for action in line_edit._clear_actions:
         icons.apply(action, "close", "muted", 14)
+    for button in line_edit.findChildren(QToolButton):
+        button.setAccessibleName("Clear")
 
 
 def fit_label(label, text):

@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import argparse
+import atexit
+import contextlib
 import os
 import sys
 import threading
@@ -64,10 +66,8 @@ def _start_error_log():
     from .core import diagnostics
     from .core.platform import data_dir
 
-    try:
+    with contextlib.suppress(OSError):
         diagnostics.start(os.path.join(data_dir(), "logs"))
-    except OSError:
-        pass
 
 
 def main(argv=None):
@@ -131,6 +131,9 @@ def main(argv=None):
     if controller.restore_recovery():
         restored = "Restored the unsaved text from your last session."
         notice = f"{notice} {restored}" if notice else restored
+    recovered = controller.recover_dictation()
+    if recovered:
+        notice = f"{notice} {recovered}" if notice else recovered
     if notice:
         # After the window is up and the voice list has loaded (its status would replace ours).
         QTimer.singleShot(1500, lambda: (controller._toast(notice, 6000), controller._status(notice)))
@@ -156,6 +159,24 @@ def main(argv=None):
     if self_test:
         QTimer.singleShot(0, lambda: _run_self_test(controller, self_test))
     return app.exec()
+
+
+def leave(code=0):
+    """End the process once everything of ours has finished. What Python and Qt tear down after this
+    point is only memory the system is about to take back, and a crash there (a clipboard's contents
+    freed after Python has gone) would make a clean quit look like a failure."""
+    atexit._run_exitfuncs()  # settings-free things like temporary folders and the error log
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            if stream is not None:
+                stream.flush()
+        except (OSError, ValueError):
+            pass
+    os._exit(code or 0)
+
+
+def run(argv=None):
+    leave(main(argv))
 
 
 def _run_self_test(controller, out_path):
@@ -255,6 +276,8 @@ def self_test_problems(report):
             problems.append(f"{key}: {report[key]}")
     if not report.get("engine_ready"):
         problems.append("engine_ready: the speech engine did not start")
+    if not report.get("voices") and os.environ.get("TTSPYTHON_SELFTEST_NO_VOICES_OK"):
+        return problems  # a server with no voices installed: what can be checked without speech has been
     if not report.get("voices"):
         problems.append("voices: none found")
     if report.get("export_error") or not report.get("mp3_export_bytes"):

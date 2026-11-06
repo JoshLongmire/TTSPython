@@ -1,5 +1,3 @@
-import sys
+from .app import run
 
-from .app import main
-
-sys.exit(main())
+run()
