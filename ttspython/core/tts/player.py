@@ -69,9 +69,8 @@ class _Segment:
 
     def remaining(self, target_wpm):
         if self.stretcher is not None:
-            not_made = max(0, self._size() - self.samples.size)
-            return self.stretcher.remaining(speed_factor(target_wpm, self.native)) + not_made
-        return self._size() - self.offset
+            return self.stretcher.remaining(speed_factor(target_wpm, self.native))
+        return self.samples.size - self.offset
 
 
 class AudioFeed:
@@ -82,6 +81,7 @@ class AudioFeed:
         self._segment = segment
         self._rate = rate
         self._resampler = StreamResampler(source_rate, rate)
+        self._made = 0
 
     @property
     def factor(self):
@@ -96,11 +96,15 @@ class AudioFeed:
     def waiting(self):
         return self._segment.held
 
-    def add(self, pcm_int16):
+    def add(self, pcm_int16, left=None):
+        """left: seconds of audio the engine now expects still to come."""
         self._grow(self._resampler.feed(pcm_int16.astype(np.float32) * (1.0 / 32768.0)))
+        if left is not None:
+            self._segment.expected = self._made + int(left * self._rate)
 
     def _grow(self, samples):
         if samples.size:
+            self._made += samples.size
             # Copied here and swapped under the lock, so the audio thread never waits for the copy.
             self._player.feed_grow(self._segment, np.concatenate([self._segment.samples, samples]))
 
@@ -108,10 +112,10 @@ class AudioFeed:
         """There is enough to start, or to carry on after running out."""
         self._segment.held = False
 
-    def finish(self, native_wpm=None):
-        """That was all of it. native_wpm: the pace it turned out to have."""
+    def finish(self):
+        """That was all of it."""
         self._grow(self._resampler.finish())
-        self._player.feed_end(self._segment, native_wpm)
+        self._player.feed_end(self._segment)
 
 
 class AudioPlayer:
@@ -138,6 +142,7 @@ class AudioPlayer:
         self._target_wpm = None
         self._paused_since = None
         self._stream_stopped = False
+        self._pause_lock = threading.Lock()  # a resume must not fall between "still paused" and stopping
         self.callback_errors = 0
         self.starved = 0  # how many times speech ran out while it was still being made
 
@@ -177,17 +182,18 @@ class AudioPlayer:
         self._schedule_pause_stop()
 
     def resume(self):
-        self._paused = False
-        self._paused_since = None
-        self._last_progress = time.monotonic()
-        if self._stream_stopped:
-            self._stream_stopped = False
-            stream = self._stream
-            if stream is not None:
-                try:
-                    stream.start()
-                except Exception:
-                    pass
+        with self._pause_lock:
+            self._paused = False
+            self._paused_since = None
+            self._last_progress = time.monotonic()
+            if self._stream_stopped:
+                self._stream_stopped = False
+                stream = self._stream
+                if stream is not None:
+                    try:
+                        stream.start()
+                    except Exception:
+                        pass
 
     def _schedule_pause_stop(self):
         timer = threading.Timer(PAUSE_STOP_SECONDS, self._stop_if_still_paused)
@@ -196,17 +202,18 @@ class AudioPlayer:
 
     def _stop_if_still_paused(self):
         """A long pause should not keep the audio device busy (and the audio thread awake)."""
-        since = self._paused_since
-        if not self._paused or since is None or time.monotonic() - since < PAUSE_STOP_SECONDS - 0.5:
-            return
-        stream = self._stream
-        if stream is None or self._stream_stopped:
-            return
-        try:
-            stream.stop()
-            self._stream_stopped = True
-        except Exception:
-            pass
+        with self._pause_lock:
+            since = self._paused_since
+            if not self._paused or since is None or time.monotonic() - since < PAUSE_STOP_SECONDS - 0.5:
+                return
+            stream = self._stream
+            if stream is None or self._stream_stopped:
+                return
+            try:
+                stream.stop()
+                self._stream_stopped = True
+            except Exception:
+                pass
 
     # --- speed -------------------------------------------------------------------
     @property
@@ -386,13 +393,11 @@ class AudioPlayer:
             if segment.stretcher is not None:
                 segment.stretcher.grow(samples)
 
-    def feed_end(self, segment, native_wpm=None):
+    def feed_end(self, segment):
         with self._lock:
             segment.growing = segment.held = False
             if segment.stretcher is not None:
                 segment.stretcher.end()
-            if native_wpm:
-                segment.native = native_wpm
 
     def enqueue_silence(self, seconds, marker=None):
         self.wait_open()

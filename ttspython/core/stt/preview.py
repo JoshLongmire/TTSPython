@@ -162,6 +162,8 @@ def _unpack(archive, folder, files):
     wanted = {name: (size, sha) for name, size, sha in files.values()}
     with tarfile.open(archive, "r:bz2") as tar:
         for member in tar:
+            if not wanted:  # the rest of the archive would only be decompressed to be skipped
+                break
             name = os.path.basename(member.name)
             if name not in wanted or not member.isfile():
                 continue

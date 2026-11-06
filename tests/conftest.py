@@ -80,3 +80,13 @@ def no_unexpected_prompts(monkeypatch):
 
     monkeypatch.setattr(QMessageBox, "question", unexpected)
     monkeypatch.setattr(QMessageBox, "warning", unexpected)
+
+
+def pytest_sessionfinish(session, exitstatus):
+    """Qt deletes what is on the clipboard after Python has gone, and that crashes (with exit code 139 on
+    Git Bash) on the offscreen platform. Left like that, a real crash at exit would look like every other run."""
+    from PySide6.QtGui import QGuiApplication
+
+    app = QGuiApplication.instance()
+    if app is not None and app.platformName() == "offscreen":
+        app.clipboard().clear()

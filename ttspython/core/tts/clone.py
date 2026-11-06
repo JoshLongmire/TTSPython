@@ -29,7 +29,7 @@ import numpy as np
 from ..download import fetch
 from ..platform import data_dir
 from ..resample import resample
-from ..settings import atomic_replace
+from ..settings import atomic_replace, write_json_atomic
 from .render import AudioBlock, Cancelled, Voice
 
 PREFIX = "clone:"
@@ -74,6 +74,7 @@ IDLE_SECONDS = 120  # the model holds over a gigabyte: let it go soon after spee
 FALLBACK_WPM = 180  # until a voice has spoken something long enough to measure
 _MEASURE_MIN_WORDS = 5
 _NATIVE_RANGE = (110, 280)
+_PACE_SAVE_CHANGE = 0.05
 
 MIN_SECONDS, MAX_SECONDS = 6, 40
 _LIMIT_MARGIN_SECONDS = 2  # the window stops by itself at MAX_SECONDS, and its timer runs a little behind
@@ -282,9 +283,9 @@ def build_voice(name, consent, audio, rate, heard, engine=None):
     else:
         codes = engine.encode(clean, rate)
     os.makedirs(voices_dir(), mode=0o700, exist_ok=True)  # recordings of someone's voice: this user only
-    for name in os.listdir(voices_dir()):
-        if name.endswith(".new"):  # left by a crash in the middle of saving: it holds a recording
-            shutil.rmtree(os.path.join(voices_dir(), name), ignore_errors=True)
+    for left_over in os.listdir(voices_dir()):
+        if left_over.endswith(".new"):  # left by a crash in the middle of saving: it holds a recording
+            shutil.rmtree(os.path.join(voices_dir(), left_over), ignore_errors=True)
     key = uuid.uuid4().hex[:12]
     folder = os.path.join(voices_dir(), key)
     staging = folder + ".new"
@@ -325,6 +326,34 @@ def remove_voice(voice_id):
     folder = voice_folder(voice_id)
     shutil.rmtree(folder, ignore_errors=True)
     return not os.path.exists(folder)
+
+
+def _pace(text, seconds):
+    """Words per minute of this speech, or 0 if it is too short to tell."""
+    words = len(text.split())
+    if words < _MEASURE_MIN_WORDS or seconds <= 0:
+        return 0
+    return max(_NATIVE_RANGE[0], min(_NATIVE_RANGE[1], words * 60 / seconds))
+
+
+def _saved_pace(voice_id):
+    try:
+        pace = voice_info(voice_id).get("pace")
+    except (OSError, ValueError, AttributeError):
+        return 0
+    return pace if isinstance(pace, (int, float)) and _NATIVE_RANGE[0] <= pace <= _NATIVE_RANGE[1] else 0
+
+
+def _save_pace(voice_id, pace):
+    """Kept with the voice, so the speed is right from the first sentence after a restart: playback
+    has started by the time a sentence's own pace is known. A failure only costs that."""
+    try:
+        info = voice_info(voice_id)
+        if isinstance(info, dict):
+            info["pace"] = round(pace, 1)
+            write_json_atomic(os.path.join(voice_folder(voice_id), "voice.json"), info)
+    except (OSError, ValueError):
+        pass
 
 
 def load_codes(voice_id):
@@ -473,10 +502,6 @@ class Engine:
                 state[s[f"{key}_input_name"]] = out[s[f"{key}_output_name"]]
         return out["audio"][0, :, :int(np.asarray(out["audio_lengths"]).reshape(-1)[0])]
 
-    def _speak_piece(self, codes, token_ids, cancel):
-        blocks = list(self._piece_blocks(codes, token_ids, cancel))
-        return np.concatenate(blocks) if blocks else np.zeros(0, dtype=np.float32)
-
     def _piece_blocks(self, codes, token_ids, cancel):
         """Yields float32 mono audio as soon as there is some. self.speed follows how fast it comes."""
         ids = self._request(codes, token_ids)
@@ -612,7 +637,7 @@ def _load_in_background():
 
 
 def _load_engine(cancel):
-    """Load the model on its own thread (5 to 10 seconds), so that Stop still works meanwhile.
+    """Load the model on its own thread (about 3 seconds), so that Stop still works meanwhile.
     A load left behind by Stop finishes, and is ready for the next sentence or let go when idle."""
     global _loader, _load_error
     if _engine is not None:
@@ -661,6 +686,9 @@ def speed_check(voice_id, cancel=None, text=SPEED_CHECK_TEXT):
     finally:
         _release_when_idle()
         _engine_lock.release()
+    pace = _pace(text, audio.size / engine.rate)
+    if pace:
+        _save_pace(voice_id, pace)
     return (audio.size / engine.rate) / elapsed if elapsed > 0 else 0.0
 
 
@@ -680,7 +708,10 @@ class CloneRenderer:
         return installed_voices()
 
     def native_wpm(self, wpm, voice_id=None):
-        return self._native.get(voice_id, FALLBACK_WPM)
+        pace = self._native.get(voice_id) or _saved_pace(voice_id)
+        if pace:
+            self._native[voice_id] = pace
+        return pace or FALLBACK_WPM
 
     def _check_ready(self, voice_id, cancel):
         """Everything that can be told before the model is touched. Returns the voice's codes."""
@@ -696,10 +727,16 @@ class CloneRenderer:
             raise RuntimeError("This voice is gone. Pick another voice.") from exc
         return codes
 
-    def _note_pace(self, voice_id, text, seconds):
-        words = len(text.split())
-        if words >= _MEASURE_MIN_WORDS and seconds > 0:
-            self._native[voice_id] = max(_NATIVE_RANGE[0], min(_NATIVE_RANGE[1], words * 60 / seconds))
+    def _note_pace(self, voice_id, text, seconds, smooth=False):
+        pace = _pace(text, seconds)
+        if not pace:
+            return
+        before = self._native.get(voice_id)
+        if smooth and before:  # it applies to the next sentence: one odd sentence should not swing it
+            pace = (before + pace) / 2
+        self._native[voice_id] = pace
+        if abs(pace - (_saved_pace(voice_id) or 0)) > pace * _PACE_SAVE_CHANGE:
+            _save_pace(voice_id, pace)
 
     def render(self, text, voice_id, wpm, cancel):
         codes = self._check_ready(voice_id, cancel)
@@ -740,7 +777,7 @@ class CloneRenderer:
         finally:
             _release_when_idle()
             _engine_lock.release()
-        self._note_pace(voice_id, text, made / engine.rate)
+        self._note_pace(voice_id, text, made / engine.rate, smooth=True)
 
 
 def _to_pcm(audio):

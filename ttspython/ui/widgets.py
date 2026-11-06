@@ -14,6 +14,16 @@ from PySide6.QtWidgets import (
 from . import icons
 
 
+def announce(widget, text):
+    """Say it to a screen reader, which does not follow a label changing by itself."""
+    try:
+        from PySide6.QtGui import QAccessible, QAccessibleAnnouncementEvent
+    except ImportError:  # Qt before 6.8
+        return
+    if QAccessible.isActive():
+        QAccessible.updateAccessibility(QAccessibleAnnouncementEvent(widget, text))
+
+
 def tool_button(icon_name, tooltip="", variant="ghost", size=18, text="", checkable=False, role="text"):
     btn = QToolButton()
     btn.setProperty("variant", variant)
@@ -447,12 +457,21 @@ class ElidedLabel(QLabel):
         self._clickable = True
         self._tip = tip
         self.setCursor(Qt.PointingHandCursor)
+        self.setFocusPolicy(Qt.TabFocus)
         self._update_tip()
 
     def _update_tip(self):
         """The full text when it is shortened, and what a click does."""
         cut = self._full if self.fontMetrics().horizontalAdvance(self._full) > self.width() else ""
         self.setToolTip("\n".join(part for part in (cut, self._tip) if part))
+        if self._clickable:
+            self.setAccessibleName(f"{self._full}. {self._tip}")
+
+    def keyPressEvent(self, event):  # noqa: N802
+        if self._clickable and event.key() in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Space):
+            self.clicked.emit()
+            return
+        super().keyPressEvent(event)
 
     def mousePressEvent(self, event):  # noqa: N802
         if self._clickable and event.button() == Qt.LeftButton:

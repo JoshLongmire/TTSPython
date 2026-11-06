@@ -39,6 +39,7 @@ SHORTCUT_ACTIONS = tuple(keys.DEFAULT_SHORTCUTS)
 TEXT_FILTER = "Text files (*.txt);;All files (*)"
 
 
+STILL_STOPPING = "Still stopping the previous speech. Try again in a moment."
 HOTKEY_RETRY_MS = (3000, 7000)  # retry busy hotkeys 3 s after start, then 10 s
 PREVIEW_MODEL_LABEL = "live preview"  # its row in Settings > Listen > Downloaded models
 
@@ -130,6 +131,8 @@ class AppController(QObject):
         self.mini = MiniPill()
         self.mini.snap = s["mini_snap"]
         self.popover = QuickPopover()
+        self._last_dictation = ""
+        self._select_in_queue = None
         self.float_toast = FloatingToast()
         self.caption = LiveCaption()
         self._dictation_target = None
@@ -144,6 +147,7 @@ class AppController(QObject):
         self.app.setWindowIcon(self.window.windowIcon())  # once: it is copied to every open window
         if self.tray:
             self.tray.show()
+        self.actions["copy_last_dictation"].setEnabled(False)
         self._apply_settings_to_ui()
         self._apply_shortcuts()
         self._apply_global_hotkeys()
@@ -157,7 +161,7 @@ class AppController(QObject):
         self._update_title()
         self._update_recent_menu()
         self._sync_reading_speed()
-        if self._hotkey_errors and any(self._hotkey_errors.values()):
+        if self.hotkeys.available and self._hotkey_errors and any(self._hotkey_errors.values()):
             QTimer.singleShot(HOTKEY_RETRY_MS[0], lambda: self._retry_hotkeys(1))
 
     # ======================================================================
@@ -197,6 +201,8 @@ class AppController(QObject):
         a("export_open", "Open folder", "folder_open", self.open_export_folder, "Show the exported file's folder")
         a("find", "Find and replace", "search", self.on_find, "Find and replace")
         a("paste", "Paste", "paste", self.on_paste, "Paste clipboard text into the editor")
+        a("copy_last_dictation", "Copy last dictation", "clipboard", self.copy_last_dictation,
+          "Copy the last text you dictated, in case it did not arrive where you wanted it")
         a("clear", "Clear", "eraser", self.on_clear, "Clear the editor (undo with Ctrl+Z)")
         a("toggle_mode", "Switch Speak / Listen", None, self.on_toggle_mode)
         a("toggle_queue", "Speech queue", "panel_right", self.on_toggle_queue, "Show or hide the speech queue", checkable=True)
@@ -231,6 +237,10 @@ class AppController(QObject):
             base = action.toolTip().split("  (")[0]
             action.setToolTip(f"{base}  ({QKeySequence(seq).toString(QKeySequence.NativeText)})" if seq else base)
         self._update_play_tip()
+        play = shortcuts.get("speak_all", "")
+        play = QKeySequence(play).toString(QKeySequence.NativeText).replace("Return", "Enter") if play else ""
+        self.editor.setPlaceholderText(f"Type or paste text here, then press Play{f' ({play})' if play else ''}. "
+                                       "Press it again to pause.")
 
     def _update_play_tip(self):
         """The Play button's tooltip says what pressing it will do now."""
@@ -275,6 +285,8 @@ class AppController(QObject):
         st.model_status.connect(self._on_model_status)
         st.preview_status.connect(self._on_preview_status)
         st.error.connect(lambda msg: self._error("Dictation", msg))
+        st.retry_available.connect(self.window.listen_panel.retry.setVisible)
+        self.window.listen_panel.retry.clicked.connect(lambda: self.stt.retry())
         eb = self.export_bridge
         eb.progress.connect(lambda d, t: w.export_status.setText(f"Exporting {d} of {t}"))
         eb.finished.connect(self._on_export_finished)
@@ -375,6 +387,8 @@ class AppController(QObject):
     # ======================================================================
     def _status(self, text):
         self.window.set_status(text)
+        if not _progress_key(text):  # every step of a download would drown out everything else
+            self.window.announce(text)
 
     def _window_in_front(self):
         return self.window.isVisible() and not self.window.isMinimized() and self.window.isActiveWindow()
@@ -444,6 +458,8 @@ class AppController(QObject):
         self.editor.begin_tracking()
         if self.speech.speak(text[start:], Source.EDITOR, py_to_u16(text, start)):
             self._status("Speaking from the cursor...")
+        else:
+            self._status(STILL_STOPPING)
 
     def on_pause_resume(self):
         if self.speech.busy:
@@ -461,7 +477,7 @@ class AppController(QObject):
         if self.speech.speak(text, Source.SELECTION, base16, replace=True):
             self._status("Speaking selected text...")
         else:
-            self._status("Still stopping the previous speech. Try again in a moment.")
+            self._status(STILL_STOPPING)
 
     def on_stop(self):
         self.speech.stop()
@@ -764,7 +780,8 @@ class AppController(QObject):
         self._queue_save_timer.start()
 
     def _refresh_queue(self):
-        self.window.queue_panel.set_items(self.queue.snapshot(), self.speech.playing_item_id)
+        select, self._select_in_queue = self._select_in_queue, None
+        self.window.queue_panel.set_items(self.queue.snapshot(), self.speech.playing_item_id, select)
         has = len(self.queue) > 0
         for key in ("queue_play", "queue_clear", "queue_remove", "queue_up", "queue_down"):
             self.actions[key].setEnabled(has)
@@ -873,6 +890,11 @@ class AppController(QObject):
         if not item_id:
             self._toast("Select an item in the queue first.")
             return
+        items = [item.id for item in self.queue.snapshot()]
+        at = items.index(item_id) if item_id in items else -1
+        rest = items[:at] + items[at + 1:] if at >= 0 else items
+        # The next one is selected, so Delete can be pressed again.
+        self._select_in_queue = rest[min(at, len(rest) - 1)] if rest and at >= 0 else None
         self.queue.remove(item_id)
         self._status(f"Removed from queue ({len(self.queue)} items)")
 
@@ -970,10 +992,13 @@ class AppController(QObject):
             from ..platform import winapi
 
             hwnd = winapi.foreground_window()
-            if winapi.is_own_window(hwnd):
+            if not winapi.is_own_window(hwnd):
+                return ("external", hwnd)
+            if self.window.isVisible() and not self.window.isMinimized():
                 return "editor"
-            return ("external", hwnd)
-        if self.window.isActiveWindow():
+            self.popover.hide()  # the pill's menu had the focus: the app underneath gets it back
+            return ("external", 0)
+        if self.window.isVisible() and self.window.isActiveWindow():
             return "editor"
         return ("external", 0)
 
@@ -989,7 +1014,7 @@ class AppController(QObject):
             return
         if self.stt.state is SttState.IDLE:
             self._dictation_target = target
-            if target == "editor" and self.speech.busy:
+            if self.speech.busy:  # the microphone would hear it, and type what the speakers say
                 self.speech.stop()
         self.stt.toggle(target)
 
@@ -1044,9 +1069,15 @@ class AppController(QObject):
             self._esc_registered = recording and self._caption_wanted()
             self._apply_global_hotkeys()
 
+    def copy_last_dictation(self):
+        if self._last_dictation:
+            self.injector.copy_only(self._last_dictation, "Copied. Press Ctrl+V to paste.")
+
     def _on_transcript(self, text, target):
+        self._last_dictation = text  # in memory only: a paste can land nowhere, with nothing to tell us
+        self.actions["copy_last_dictation"].setEnabled(True)
         if target == "editor":
-            self.editor.append_line(text)
+            self.editor.add_dictation(text)
             self._status("Transcript inserted")
             return
         hwnd = target[1] if isinstance(target, tuple) else 0
@@ -1155,6 +1186,8 @@ class AppController(QObject):
             running.append("An audio export is still running.")
         if self.stt.state is not SttState.IDLE:
             running.append("A dictation is still in progress.")
+        if any(dialog is not None and dialog.downloading for dialog in (self._voice_browser, self._clone_dialog)):
+            running.append("A download is still running.")
         if not running:
             return True
         answer = QMessageBox.question(self.window, "Quit TTSPython", " ".join(running) + " Quit anyway?",
@@ -1475,7 +1508,8 @@ class AppController(QObject):
             self.speech.stop()
             self._apply_engine(values)
             self._tested_voice = True
-            self.speech.speak("This is how speech will sound.", Source.TEST)
+            if not self.speech.speak("This is how speech will sound.", Source.TEST):
+                self._status(STILL_STOPPING)
         elif name == "sync_engine":
             if self._tested_voice:  # only a Test changed the engine; otherwise leave speech alone
                 self._tested_voice = False
@@ -1537,6 +1571,7 @@ class AppController(QObject):
             self._start_clip_monitor()
         elif not s["clipboard_monitor"]:
             self._clip_poll.stop()
+        self.actions["copy_last_dictation"].setEnabled(False)
         self._apply_settings_to_ui()
         self._apply_shortcuts()
         self._apply_global_hotkeys()
@@ -1649,6 +1684,9 @@ class AppController(QObject):
         taken = {a: self.settings["global_hotkeys"].get(a, "") for a, err in self._hotkey_errors.items() if err}
         if not taken:
             return
+        if not self.hotkeys.available:  # this desktop has none, so no other keys would help
+            self._status(self.hotkeys.reason)
+            return
         names = ", ".join(f"{combo or '?'} ({keys.GLOBAL_HOTKEY_LABELS.get(a, a)})" for a, combo in taken.items())
         text = f"Another app uses {names}. Pick other keys in Settings > Shortcuts."
         self._status(text)
@@ -1697,7 +1735,12 @@ class AppController(QObject):
             # (the window may have lived on a monitor that is now unplugged).
             grab = QPoint(rect.left() + min(120, rect.width() // 2), rect.top() + 12)
             for screen in QGuiApplication.screens():
-                if screen.availableGeometry().contains(grab):
+                area = screen.availableGeometry()
+                if area.contains(grab):
+                    # Saved on a bigger monitor? The controls at the bottom must stay on this one.
+                    rect.setSize(rect.size().boundedTo(area.size()))
+                    rect.moveLeft(max(area.left(), min(rect.left(), area.right() - rect.width() + 1)))
+                    rect.moveTop(max(area.top(), min(rect.top(), area.bottom() - rect.height() + 1)))
                     self.window.setGeometry(rect)
                     placed = True
                     break
@@ -1705,7 +1748,7 @@ class AppController(QObject):
             area = QGuiApplication.primaryScreen().availableGeometry()
             w, h = min(1280, int(area.width() * 0.8)), min(820, int(area.height() * 0.8))
             self.window.resize(w, h)
-            self.window.move(area.center().x() - w // 2, area.center().y() - h // 2)
+            self.window.move(area.center().x() - self.window.width() // 2, area.center().y() - self.window.height() // 2)
         if s["splitter"] and len(s["splitter"]) == 2:
             self.window.splitter.setSizes(s["splitter"])
         self._restore_maximized = bool(geo and geo.get("maximized"))
@@ -1747,7 +1790,10 @@ class AppController(QObject):
         if self.settings["close_to_tray"] and self.tray is not None:
             event.ignore()
             self.window.hide()
-            self._toast("TTSPython is still running in the tray.")
+            if not self.settings["tray_notice_shown"]:  # once: after that it is just how it works
+                self._toast("TTSPython is still running in the tray.")
+                self.settings.set("tray_notice_shown", True)
+                self.save_soon()
             return
         if not self._confirm_quit():
             event.ignore()

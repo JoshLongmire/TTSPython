@@ -46,7 +46,7 @@ class Tray(QSystemTrayIcon):
         menu = QMenu()
         # No "dictate" entry: opening the tray menu takes focus from the app the text should go to.
         for key in ("show_window", "mini_mode", None, "speak_clipboard", "pause_resume", "stop", None,
-                    "settings", None, "quit"):
+                    "copy_last_dictation", "settings", None, "quit"):
             if key is None:
                 menu.addSeparator()
             else:

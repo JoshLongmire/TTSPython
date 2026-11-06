@@ -12,9 +12,11 @@ lameenc>=1.7
 
 # Speech-to-text (offline)
 faster-whisper>=1.1.0
+huggingface_hub>=0.21  # downloads the Whisper models
 sherpa-onnx>=2.0.1  # instant live preview while dictating (its model downloads on first use)
 
-# Your own voice (optional model download; runs on the onnxruntime faster-whisper brings)
+# Your own voice (optional model download)
+onnxruntime>=1.17
 sentencepiece>=0.2.0
 
 # Global hotkeys and typing at the cursor on Linux (X11)

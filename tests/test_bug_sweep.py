@@ -51,7 +51,7 @@ def test_complete_model_is_used_offline(tmp_path, monkeypatch):
 
     folder = tmp_path / "snap"
     folder.mkdir()
-    for name in ("config.json", "tokenizer.json", "model.bin"):
+    for name in ("config.json", "tokenizer.json", "model.bin", "vocabulary.txt"):
         (folder / name).write_text("x")
     calls = _fake_hub(monkeypatch, folder)
     assert service.download_whisper("small") == str(folder)

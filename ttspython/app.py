@@ -59,6 +59,17 @@ def _console_streams(argv):
         sys.stderr = sink
 
 
+def _start_error_log():
+    """Errors only, kept on this computer. Never in the way: the app runs without it."""
+    from .core import diagnostics
+    from .core.platform import data_dir
+
+    try:
+        diagnostics.start(os.path.join(data_dir(), "logs"))
+    except OSError:
+        pass
+
+
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
     _console_streams(argv)
@@ -70,6 +81,7 @@ def main(argv=None):
     if session_type() == "wayland" and os.environ.get("DISPLAY") and not os.environ.get("QT_QPA_PLATFORM"):
         # XWayland keeps always-on-top and window positioning working for the mini bar.
         os.environ["QT_QPA_PLATFORM"] = "xcb"
+    _start_error_log()
     if IS_WINDOWS:
         from .platform.winapi import disable_power_throttling, set_app_user_model_id
 
@@ -106,7 +118,9 @@ def main(argv=None):
     store = SettingsStore()
     controller = AppController(app, store)
     notice = None
-    if store.info.get("error") and store.info.get("source") == "defaults":
+    if store.info.get("read_failed"):
+        notice = "Another program is holding your settings file, so defaults are in use for now. The file was not changed."
+    elif store.info.get("error") and store.info.get("source") == "defaults":
         copy = store.info.get("broken_copy")
         notice = ("Your settings file could not be read, so defaults are in use."
                   + (f" A copy was kept: {copy}" if copy else ""))

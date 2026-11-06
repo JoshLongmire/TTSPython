@@ -430,7 +430,7 @@ def test_a_model_that_never_stops_is_stopped():
 
 def test_one_piece_never_passes_the_models_limit():
     engine = fake_engine()
-    audio = engine._speak_piece(CODES, list(range(1000)), threading.Event())
+    audio = np.concatenate(list(engine._piece_blocks(CODES, list(range(1000)), threading.Event())))
     assert audio.size == clone.MAX_FRAMES * 3840
 
 

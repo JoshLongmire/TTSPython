@@ -50,6 +50,7 @@ STT_LANGUAGES = [
 
 DEFAULTS = {
     "settings_version": SETTINGS_VERSION,
+    "tray_notice_shown": False,
     "theme_preset": DEFAULT_THEME,
     "performance_mode": False,
     "mode": "tts",
@@ -142,7 +143,7 @@ def _clamp_int(value, lo, hi, default):
 def _clamp_float(value, lo, hi, default):
     try:
         f = float(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):  # OverflowError: an integer too big for a float
         return default
     if f != f:  # NaN
         return default
@@ -170,7 +171,7 @@ def normalize_device_ref(value):
         text = value.strip()
         if not text:
             return None
-        if text.isdigit():
+        if text.isdecimal():
             return {"name": "", "hostapi": "", "index": int(text)}
         return {"name": text, "hostapi": "", "index": None}
     return None
@@ -193,6 +194,9 @@ def geometry_to_window(geometry):
     return {"x": x, "y": y, "w": w, "h": h, "maximized": False}
 
 
+_LARGEST_SCREEN_VALUE = 100_000
+
+
 def _normalize_window(value):
     if not isinstance(value, dict):
         return None
@@ -200,8 +204,8 @@ def _normalize_window(value):
         out = {k: int(value[k]) for k in ("x", "y", "w", "h")}
     except (KeyError, TypeError, ValueError, OverflowError):
         return None
-    if out["w"] < 200 or out["h"] < 150:
-        return None
+    if out["w"] < 200 or out["h"] < 150 or max(map(abs, out.values())) > _LARGEST_SCREEN_VALUE:
+        return None  # Qt refuses a number that does not fit in 32 bits, and the app would not start
     out["maximized"] = bool(value.get("maximized", False))
     return out
 
@@ -212,7 +216,7 @@ def _normalize_mini_pos(value):
     try:
         rx = float(value["rx"])
         ry = float(value["ry"])
-    except (KeyError, TypeError, ValueError):
+    except (KeyError, TypeError, ValueError, OverflowError):
         return None
     if rx != rx or ry != ry:  # NaN
         return None
@@ -239,7 +243,7 @@ def normalize(raw) -> dict:
     for key in ("performance_mode", "clipboard_monitor", "clipboard_auto_queue",
                 "stt_unload_model_when_idle", "stt_auto_unload_enabled", "sentence_highlight",
                 "queue_loop", "queue_panel_visible", "global_hotkeys_enabled", "close_to_tray",
-                "mini_snap", "mini_waveform", "stt_live_preview"):
+                "mini_snap", "mini_waveform", "stt_live_preview", "tray_notice_shown"):
         out[key] = _as_bool(raw.get(key, d[key]), d[key])
 
     out["mode"] = raw.get("mode") if raw.get("mode") in ("tts", "stt") else d["mode"]
@@ -249,7 +253,7 @@ def normalize(raw) -> dict:
     out["stt_whisper_model"] = model.strip() if isinstance(model, str) and model.strip() else d["stt_whisper_model"]
     lang = raw.get("stt_language")
     valid_langs = {code for code, _ in STT_LANGUAGES}
-    out["stt_language"] = lang if lang in valid_langs else d["stt_language"]
+    out["stt_language"] = lang if isinstance(lang, str) and lang in valid_langs else d["stt_language"]
 
     out["stt_input_device"] = normalize_device_ref(raw.get("stt_input_device"))
     out["tts_output_device"] = normalize_device_ref(raw.get("tts_output_device"))
@@ -277,7 +281,8 @@ def normalize(raw) -> dict:
         window = geometry_to_window(raw.get("geometry"))
     out["window"] = window
     splitter = raw.get("splitter")
-    out["splitter"] = splitter if isinstance(splitter, list) and all(isinstance(v, int) for v in splitter) else None
+    out["splitter"] = splitter if isinstance(splitter, list) and all(
+        type(v) is int and 0 <= v <= _LARGEST_SCREEN_VALUE for v in splitter) else None
     recent = raw.get("recent_files")
     out["recent_files"] = [p for p in recent if isinstance(p, str) and p][:RECENT_MAX] if isinstance(recent, list) else []
     out["export_dir"] = raw.get("export_dir") if isinstance(raw.get("export_dir"), str) else ""
@@ -286,8 +291,10 @@ def normalize(raw) -> dict:
     return out
 
 
-def atomic_replace(src, dst):
-    """Replace dst with src, tolerating Windows lock/read-only issues."""
+def atomic_replace(src, dst, may_copy=True):
+    """Replace dst with src, tolerating Windows lock/read-only issues. may_copy: as a last resort,
+    write over dst in place. A failure part way through that damages dst, so a person's own
+    documents do not allow it: they get an error instead, with the file as it was."""
     try:
         os.replace(src, dst)
         return
@@ -298,16 +305,21 @@ def atomic_replace(src, dst):
             os.chmod(dst, 0o666)
         except OSError:
             pass
+    time.sleep(_HELD_FILE_WAIT)  # a sync tool or antivirus holding it for a moment
     try:
         os.replace(src, dst)
         return
     except OSError:
-        pass
+        if not may_copy:
+            raise
     shutil.copyfile(src, dst)  # if this fails, src stays: it may be the only whole copy left
     try:
         os.remove(src)
     except OSError:
         pass
+
+
+_HELD_FILE_WAIT = 0.15
 
 
 def write_json_atomic(path, data):
@@ -368,9 +380,16 @@ def load(path=None, legacy=None):
     info = {"path": path, "source": "defaults", "broken_copy": None}
     if os.path.exists(path):
         try:
-            data = normalize(_read_settings(path))
+            raw = _read_settings(path)
+            if not isinstance(raw, dict):
+                raise ValueError("this is not a settings file")
+            data = normalize(raw)
             info["source"] = "file"
             return data, info
+        except OSError as exc:  # held by another program, not broken: saving must not replace it
+            info["read_failed"] = True
+            info["error"] = str(exc)
+            return defaults(), info
         except Exception as exc:
             stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             name = f"settings.broken.{stamp}.json"
@@ -421,5 +440,26 @@ class SettingsStore:
     def update(self, values):
         self.data.update(values)
 
+    def _can_save(self):
+        """Settings that could not be read at start must not be replaced by the defaults used instead."""
+        if not self.info.get("read_failed"):
+            return True
+        try:
+            raw = _read_settings(self.path, tries=1)
+        except FileNotFoundError:
+            raw = None
+        except OSError:
+            return False
+        except ValueError:
+            raw = None
+        self.info["read_failed"] = False
+        if isinstance(raw, dict):
+            start = defaults()
+            for key, value in normalize(raw).items():  # keep the file's values, except what was changed since
+                if key not in start or self.data.get(key) == start[key]:
+                    self.data[key] = value
+        return True
+
     def save(self):
-        write_json_atomic(self.path, self.data)
+        if self._can_save():
+            write_json_atomic(self.path, self.data)

@@ -119,10 +119,6 @@ class Stretcher:
         """Starved, and the fade-out has been played too."""
         return self.starved and self._offset >= self._pending.size
 
-    def fraction(self):
-        """How far into the input playback is, 0..1."""
-        return min(1.0, self.pos / max(1, self.x.size))
-
     def remaining(self, factor):
         """Output samples still to come at this speed (estimate)."""
         left = max(0.0, self.x.size - self.pos) / (factor or 1.0)

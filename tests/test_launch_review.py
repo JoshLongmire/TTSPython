@@ -114,11 +114,18 @@ def test_saving_follows_a_link_and_keeps_permissions(tmp_path, monkeypatch):
     real.write_text("old", encoding="utf-8")
     monkeypatch.setattr(textio.os.path, "islink", lambda p: p == str(link))
     monkeypatch.setattr(textio.os.path, "realpath", lambda p: str(real))
-    copied = []
-    monkeypatch.setattr(textio.shutil, "copymode", lambda a, b: copied.append((a, b)))
+    opened = []
+    real_open = textio.os.open
+
+    def spy(path, flags, mode=0o777):
+        opened.append((path, mode))
+        return real_open(path, flags, mode)
+
+    monkeypatch.setattr(textio.os, "open", spy)
     textio.write_text_file(str(link), "new")
     assert real.read_text(encoding="utf-8") == "new" and not link.exists()
-    assert copied == [(str(real), str(real) + ".part")]
+    assert opened[0][0].startswith(str(real) + ".")  # beside the real file, with its permissions
+    assert opened[0][1] == os.stat(real).st_mode & 0o777
 
 
 def test_a_locked_file_leaves_no_part_file_beside_it(tmp_path, monkeypatch):
@@ -373,9 +380,10 @@ def test_deleting_a_model_asks_first(c, monkeypatch):
 
 
 # --- voices -----------------------------------------------------------------------------------
-def test_esc_in_get_more_voices_cancels_the_download(qtbot):
+def test_esc_in_get_more_voices_cancels_the_download(qtbot, monkeypatch):
     dialog = VoiceBrowser()
     qtbot.addWidget(dialog)
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.Yes)
     dialog._cancel = threading.Event()
     dialog.reject()
     assert dialog._cancel.is_set()

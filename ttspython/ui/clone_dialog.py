@@ -5,8 +5,8 @@ import threading
 
 from PySide6.QtCore import QObject, Qt, QTimer, Signal
 from PySide6.QtWidgets import (
-    QDialog, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMessageBox, QProgressBar, QPushButton,
-    QVBoxLayout, QWidget,
+    QDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMessageBox, QProgressBar, QPushButton,
+    QScrollArea, QVBoxLayout, QWidget,
 )
 
 from ..core.download import DownloadCancelled
@@ -15,6 +15,7 @@ from ..core.stt.recorder import Recorder
 from ..core.stt.service import friendly_audio_error
 from ..core.tts import clone
 from ..core.tts.render import Cancelled
+from .widgets import announce
 
 RECORD_RATE = 48000
 WHISPER_RATE = 16000
@@ -46,7 +47,7 @@ class CloneDialog(QDialog):
         busy_reason: why recording cannot start now. busy_speaking: why nothing can be removed now."""
         super().__init__(parent)
         self.setWindowTitle("Your own voice")
-        self.setMinimumSize(560, 560)  # all the buttons fit in one row
+        self.setMinimumSize(560, 420)  # all the buttons fit in one row; on a short screen it scrolls
         self.resize(620, 660)
         self._transcribe = transcribe
         self._recorder = recorder or Recorder(sample_rate=RECORD_RATE)
@@ -70,7 +71,15 @@ class CloneDialog(QDialog):
         self._relay.status.connect(self._set_status)
         self._relay.built.connect(self._on_built)
 
-        lay = QVBoxLayout(self)
+        content = QWidget()
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setWidget(content)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.addWidget(scroll)
+        lay = QVBoxLayout(content)
         lay.setContentsMargins(22, 18, 22, 16)
         lay.setSpacing(10)
         title = QLabel("Your own voice")
@@ -202,15 +211,7 @@ class CloneDialog(QDialog):
 
     def _set_status(self, text):
         self.status.setText(text)
-        self._announce(text)
-
-    def _announce(self, text):
-        """Say it to a screen reader, which does not follow a label changing by itself."""
-        try:
-            from PySide6.QtGui import QAccessible, QAccessibleAnnouncementEvent
-        except ImportError:  # Qt before 6.8
-            return
-        QAccessible.updateAccessibility(QAccessibleAnnouncementEvent(self.status, text))
+        announce(self.status, text)
 
     def model_status(self, text):
         """What Whisper is doing, while the recording is being checked (it may be downloading)."""
@@ -492,6 +493,10 @@ class CloneDialog(QDialog):
             self._meter.stop()
             self._recording = False
             self._recorder.stop()
+
+    @property
+    def downloading(self):
+        return self._cancel is not None and not self._cancel.is_set()
 
     def _may_close(self):
         if self._cancel is not None and not self._cancel.is_set():

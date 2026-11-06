@@ -33,6 +33,7 @@ class SttBridge(QObject):
     transcript_ready = Signal(str, object)
     model_status = Signal(str)
     preview_status = Signal(str)
+    retry_available = Signal(bool)
     error = Signal(str)
 
     def __init__(self, service, parent=None):
@@ -43,6 +44,7 @@ class SttBridge(QObject):
         ev.on("transcript_ready", self.transcript_ready.emit)
         ev.on("model_status", self.model_status.emit)
         ev.on("preview_status", self.preview_status.emit)
+        ev.on("retry_available", self.retry_available.emit)
         ev.on("error", self.error.emit)
 
 

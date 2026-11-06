@@ -13,7 +13,8 @@ FIRST_MAX = 120
 CHUNK_MAX = 300
 MERGE_BELOW = 20
 
-_BOUNDARY = re.compile(r"([.!?…]+[\"'”’)\]]*)(\s+)|(\n\s*)")
+# The look-behind only tries from the start of a run of dots: from each one, 16,000 dots took 2.3 s.
+_BOUNDARY = re.compile(r"(?<![.!?…])([.!?…]+[\"'”’)\]]*)(\s+)|(\n\s*)")
 _SOFT_BREAK = re.compile(r"[,;:—–]\s+|\s+")
 _PARAGRAPH = re.compile(r"\r?\n[ \t]*\r?\n")
 _LONE_SURROGATE = re.compile("[\ud800-\udfff]")

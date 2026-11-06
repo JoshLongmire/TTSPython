@@ -4,10 +4,10 @@ __pycache__/
 *.pyo
 *.pyd
 *.egg-info/
-.eggs/
 build/
 dist/
-*.egg
+out/
+node_modules/
 
 # Virtual environments
 .venv/
@@ -25,7 +25,7 @@ credentials*
 # App runtime state (a settings file next to the app: --settings, or v4's tts_settings.json)
 tts_settings.json
 settings.json
-settings.json.tmp
+*.json.tmp
 settings.broken.*.json
 recovery.json
 queue.json

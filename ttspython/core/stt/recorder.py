@@ -2,13 +2,16 @@
 from __future__ import annotations
 
 import threading
+import time
 
 import numpy as np
 
-from ..resample import resample
+from ..resample import StreamResampler
 
 SAMPLE_RATE = 16000
 MAX_SECONDS = 30 * 60
+NO_SOUND_SECONDS = 3      # a microphone that gives nothing for this long has gone (unplugged, or its driver stopped)...
+FIRST_SOUND_SECONDS = 10  # ...though one that is starting up (Bluetooth) can take this long
 
 
 def open_input_stream(sd, device, sample_rate, callback, dtype="int16", blocksize=1024):
@@ -38,9 +41,11 @@ class Recorder:
         self._blocks = []
         self._frames = 0
         self._limit_fired = False
+        self._last_block = None
         self._stream = None
         self.level = 0.0
         self.on_limit = None
+        self.on_lost = None   # the microphone stopped giving audio, without any error
         self.on_block = None  # gets each captured block (int16 at capture_rate): the instant preview
 
     @property
@@ -62,6 +67,7 @@ class Recorder:
             self._blocks = []
             self._frames = 0
             self._limit_fired = False
+        self._last_block = None
         stream, rate = open_input_stream(self.sd, device, self.sample_rate, self._callback)
         self._capture_rate = rate
         self._max_frames = int(rate * self._max_seconds)
@@ -74,8 +80,21 @@ class Recorder:
                 pass
             raise
         self._stream = stream
+        threading.Thread(target=self._watch, args=(stream,), name="mic-watch", daemon=True).start()
+
+    def _watch(self, stream):
+        started = time.monotonic()
+        while self._stream is stream:
+            time.sleep(min(0.25, NO_SOUND_SECONDS / 2))
+            last = self._last_block
+            silent = time.monotonic() - last > NO_SOUND_SECONDS if last else time.monotonic() - started > FIRST_SOUND_SECONDS
+            if silent and self._stream is stream:
+                if self.on_lost:
+                    self.on_lost()
+                return
 
     def _callback(self, indata, frames, _time, _status):
+        self._last_block = time.monotonic()
         block = indata[:, 0].copy()
         limit_hit = kept = False
         with self._lock:
@@ -103,9 +122,15 @@ class Recorder:
         """int16 blocks -> float32 in [-1, 1] at sample_rate, without extra full-size copies."""
         if not blocks:
             return np.zeros(0, dtype=np.float32)
-        audio = np.concatenate(blocks).astype(np.float32)
-        audio *= 1.0 / 32768.0
-        return resample(audio, self._capture_rate, self.sample_rate)
+        if self._capture_rate == self.sample_rate:
+            audio = np.concatenate(blocks).astype(np.float32)
+            audio *= 1.0 / 32768.0
+            return audio
+        # Block by block: all at once took 2.2 GB for half an hour of recording.
+        converter = StreamResampler(self._capture_rate, self.sample_rate)
+        parts = [converter.feed(block.astype(np.float32) * (1.0 / 32768.0)) for block in blocks]
+        parts.append(converter.finish())
+        return np.concatenate(parts)
 
     def snapshot(self, start=0):
         """Audio captured so far from sample start (at sample_rate), without stopping."""
@@ -134,8 +159,9 @@ class Recorder:
                 pass
         self.level = 0.0
         with self._lock:
-            blocks, self._blocks = self._blocks, []
+            blocks = list(self._blocks)
+        audio = self._to_float(blocks)  # the blocks stay until this has worked
+        with self._lock:
+            self._blocks = []
             self._frames = 0
-        audio = self._to_float(blocks)
-        del blocks
         return audio

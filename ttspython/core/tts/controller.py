@@ -419,8 +419,11 @@ class SpeechController:
     def _restart_at_heard_word(self, utt, text, base16, chunks):
         """New chunks starting at the word being heard (the voice changed mid-sentence)."""
         pos = self.player.position(utt)
-        if pos is None:  # nothing heard yet
-            index, fraction = max(0, self._playing_index), 0.0
+        if pos is None:  # between two chunks: the last one was heard to its end
+            index, fraction = self._playing_index + 1, 0.0
+            if index >= len(chunks):
+                self.player.drop_utterance(utt)
+                return "", base16, [], index
         else:
             index, fraction = pos
         index = min(index, len(chunks) - 1)
@@ -468,10 +471,11 @@ class SpeechController:
                             idx = min(idx, dropped)
                 chunk = chunks[idx]
                 wpm = self.rate
+                voice = self.voice_id  # once: set_voice may change it at any moment
                 marker = Marker(utt_id=utt, index=idx, total=len(chunks), pos16=chunk.pos16, end16=chunk.end16,
                                 generation=generation, item_id=item_id, shown=shown)
-                if hasattr(renderer, "streams") and renderer.streams(self.voice_id):
-                    played = self._play_while_making(renderer, chunk.text, wpm, marker)
+                if hasattr(renderer, "streams") and renderer.streams(voice):
+                    played = self._play_while_making(renderer, chunk.text, voice, wpm, marker)
                     if played is None:
                         restart = True
                         break
@@ -480,12 +484,12 @@ class SpeechController:
                     idx += 1
                     continue
                 try:
-                    pcm, rate = renderer.render(chunk.text, self.voice_id, wpm, self._cancel)
+                    pcm, rate = renderer.render(chunk.text, voice, wpm, self._cancel)
                 except Cancelled:
                     return False
                 if idx == 0:
                     pcm = trim_leading_silence(pcm, rate)
-                native = renderer.native_wpm(wpm, self.voice_id) if hasattr(renderer, "native_wpm") else wpm
+                native = renderer.native_wpm(wpm, voice) if hasattr(renderer, "native_wpm") else wpm
                 if self._cancel.is_set() or not self.player.enqueue(pcm, rate, marker, native_wpm=native):
                     return False
                 idx += 1
@@ -520,10 +524,10 @@ class SpeechController:
             begin(utt)
             idx = 0
 
-    def _play_while_making(self, renderer, text, wpm, marker):
+    def _play_while_making(self, renderer, text, voice, wpm, marker):
         """Queue one chunk and add to it as the engine makes it. Returns True when all of it is
-        queued, False if stopped, None if the voice changed meanwhile."""
-        voice = self.voice_id
+        queued, False if stopped, None if the voice changed meanwhile. The chunk plays at the pace
+        known when it starts: changing it later would be heard as a jump in the middle of a sentence."""
         feed = None
         blocks = renderer.stream(text, voice, wpm, self._cancel)
         try:
@@ -542,7 +546,7 @@ class SpeechController:
                     feed = self.player.open_feed(block.rate, marker, native, made + block.left)
                     if feed is None:
                         return False
-                feed.add(pcm)
+                feed.add(pcm, block.left)
                 if feed.waiting and enough_to_play(feed.buffered_seconds, block.left, block.speed, feed.factor,
                                                    block.next_block):
                     feed.release()
@@ -552,7 +556,7 @@ class SpeechController:
             blocks.close()  # gives the model back, on this thread
         if feed is None:
             return not self._cancel.is_set()
-        feed.finish(renderer.native_wpm(wpm, voice))
+        feed.finish()
         return not self._cancel.is_set()
 
     def _check_stalled(self):

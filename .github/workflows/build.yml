@@ -56,6 +56,20 @@ jobs:
           "$app" --quit
           wait $pid
           test -f "$TTSPYTHON_SETTINGS"  # the full app started and saved on quit
+      - name: Self-test
+        # Loads every part started on first use (Whisper, the voice model's libraries, the live preview).
+        # Does not stop the release yet: it has not run on these machines, which have no audio device.
+        continue-on-error: true
+        shell: bash
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          app=dist/TTSPython/TTSPython
+          [ "$RUNNER_OS" = "Windows" ] && app="$app.exe"
+          TTSPYTHON_SELFTEST="$RUNNER_TEMP/selftest.json" TTSPYTHON_SETTINGS="$RUNNER_TEMP/selftest-settings.json" \
+            TTSPYTHON_DATA="$RUNNER_TEMP/selftest-data" "$app"
+          cat "$RUNNER_TEMP/selftest.json"
+          python -c "import json, os, sys; sys.exit(bool(json.load(open(os.environ['RUNNER_TEMP'] + '/selftest.json'))['problems']))"
       - name: Installer test
         if: runner.os == 'Windows'
         shell: pwsh

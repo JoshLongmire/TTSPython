@@ -49,6 +49,8 @@ The numeric keypad's Enter works in every shortcut that uses `Enter`.
 
 All of these except `Esc` can be changed in **Settings > Shortcuts**.
 
+In the editor, `Tab` types a tab; `Ctrl+Tab` and `Ctrl+Shift+Tab` move to the next and previous control.
+
 ## Common workflows
 
 ### Listen to an article
@@ -95,4 +97,5 @@ When TTSPython is already running, these are passed to the running copy.
 
 - Settings: `%APPDATA%\TTSPython\settings.json` (Windows), `~/.config/ttspython/settings.json` (Linux). Saved automatically, with the queue (`queue.json`) and unsaved text (`recovery.json`) next to it.
 - Downloaded Piper voices, the Piper program, live preview models and your own voices: `%LOCALAPPDATA%\TTSPython` (Windows), `~/.local/share/ttspython` (Linux).
+- Errors (no text you read or dictate): the `logs` folder in the same place as the voices.
 - Whisper models: the shared Hugging Face cache (`~/.cache/huggingface`, or `%USERPROFILE%\.cache\huggingface` on Windows). Delete them in **Settings > Listen > Downloaded models**.

@@ -199,13 +199,13 @@ def test_running_out_is_counted_and_holds_until_released(player):
     assert player.callback_errors == 0
 
 
-def test_the_pace_it_turned_out_to_have_takes_over(player):
+def test_the_speed_slider_is_followed_while_it_is_being_made(player):
     feed = player.open_feed(RATE, marker(), 180, 1.0)
     player.set_target_wpm(360)
     assert feed.factor == 2.0
     feed.add(pcm(0.2))
-    feed.finish(native_wpm=120)
-    assert feed.factor == 3.0
+    feed.finish()
+    assert feed.factor == 2.0
 
 
 def test_how_far_along_uses_the_expected_length_until_it_is_finished(player):
@@ -214,7 +214,6 @@ def test_how_far_along_uses_the_expected_length_until_it_is_finished(player):
     seg = feed._segment
     seg.stretcher.pos = RATE / 2
     assert seg.fraction() == pytest.approx(0.05)
-    assert player.queued_seconds(1) == pytest.approx(9.5, abs=0.2)
     feed.finish()
     assert seg.fraction() == pytest.approx(0.5, abs=0.02)
 

@@ -140,6 +140,7 @@ class MiniPill(_NeverActivated, QWidget):
                     16 if recording else 18)
         self.mic.setToolTip("Stop dictating" if recording else ("Transcribing..." if transcribing else
                                                                 "Dictate (types where your cursor is)"))
+        self.mic.setAccessibleName(self.mic.toolTip())
         self.mic.style().unpolish(self.mic)
         self.mic.style().polish(self.mic)
         self.wave.color_role = "danger" if recording else "accent"
@@ -147,6 +148,7 @@ class MiniPill(_NeverActivated, QWidget):
     def set_speaking(self, speaking):
         icons.apply(self.play, "stop" if speaking else "play", "on_accent", 16 if speaking else 18)
         self.play.setToolTip("Stop speaking" if speaking else "Speak highlighted text (or the clipboard)")
+        self.play.setAccessibleName(self.play.toolTip())
 
     def paintEvent(self, _event):  # noqa: N802
         t = self._tokens

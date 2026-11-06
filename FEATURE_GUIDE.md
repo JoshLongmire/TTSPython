@@ -84,7 +84,7 @@ In the status bar (or Settings > Clipboard):
 - **Clipboard** switch turns it on. Text already on the clipboard when you turn it on is not used.
 - **Speak** reads copied text right away; **Queue** adds it to the queue. This choice appears once the switch is on.
 - **Auto-Queue**: while speech is playing, copied text is queued instead of ignored, and queued items play once after the current speech. When reading ends, the queue is read next, with the clipboard monitor on or off.
-- Text shorter than 6 characters is ignored, and so is text TTSPython itself put on the clipboard.
+- Text shorter than 6 characters is ignored, and so is text TTSPython itself put on the clipboard and anything a password manager marks as private.
 
 ## Export audio
 

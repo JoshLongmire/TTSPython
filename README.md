@@ -26,7 +26,7 @@ A free, open-source, offline text-to-speech (TTS) and speech-to-text (STT) deskt
 - **More voices:** besides the system voices (including the Windows 11 voices Windows hides from older apps, such as Mark), **Settings > Speech > Get more voices** downloads natural-sounding **Piper** voices: dozens in English and many other languages, about 60 MB each, downloaded once and then fully offline.
 - **Your own voice:** read a short statement out loud and the app makes a copy of your voice, entirely on your computer. See [Your own voice](#your-own-voice).
 - Choose the **output device** in Settings (speakers, headset, virtual cable); every device from every audio system is listed, and **Refresh** finds one you plugged in later.
-- Speech starts within a fraction of a second, even for very long texts, because it is prepared a few seconds ahead of what you hear.
+- With system and Piper voices, speech starts within a fraction of a second, even for very long texts, because it is prepared a few seconds ahead of what you hear. Your own voice is heard while it is being made: see [Your own voice](#your-own-voice).
 
 ### Listen (speech-to-text)
 - Offline dictation with `faster-whisper` (CPU, int8). Press the record button, speak, press again.
@@ -76,7 +76,7 @@ Work even when TTSPython is in the background. All can be changed in **Settings 
 ### Look and feel
 - 12 themes: **Studio** (new default), Dark, Twilight, Light, High Contrast, Forest, New Vegas, Spiral, Poly, Sunset, Paper, Graphite. Every theme is checked for readable text contrast.
 - **Performance Mode** reduces animations and redraws for slower PCs.
-- **System tray** icon (Show window, Mini mode, Speak selection or clipboard, Pause or resume, Stop, Settings, Quit). Its tooltip says what is happening, and a red dot shows while dictation records. Optionally, closing the window keeps TTSPython running in the tray.
+- **System tray** icon (Show window, Mini mode, Speak selection or clipboard, Pause or resume, Stop, Copy last dictation, Settings, Quit). Its tooltip says what is happening, and a red dot shows while dictation records. Optionally, closing the window keeps TTSPython running in the tray.
 - The window, Settings and mini bar fit small windows and large display scaling without cutting anything off.
 
 ## Requirements
@@ -94,13 +94,14 @@ Download the latest build from [Releases](https://github.com/JoshLongmire/TTSPyt
   rights, adds a Start menu entry and can be removed in Windows Settings > Apps. Installing a new version over an old
   one keeps your settings. Uninstalling asks whether to delete your settings, unsaved text, voices and voice
   recordings, and keeps them unless you say yes (`unins000.exe /VERYSILENT /DELETEUSERDATA=1` says yes without asking).
-  Speech recognition models are shared with other programs: delete them first in **Settings > Listen**.
+  That includes the voice model, the live preview models and downloaded voices. Whisper models are shared with other
+  programs and are kept either way: delete them first in **Settings > Listen**.
 - **Windows zip:** `TTSPython-<version>-windows-x64.zip`. Extract it anywhere and run `TTSPython\TTSPython.exe`.
 - The app is not code-signed, so SmartScreen may warn you about either one: choose **More info > Run anyway**.
   Each release lists its files' checksums in `SHA256SUMS.txt`, so you can check what you downloaded.
   The app folder also holds `LICENSE.txt` and `THIRD_PARTY_LICENSES.txt`.
 - **Linux:** `TTSPython-<version>-linux-x86_64.tar.gz`. Extract it and run `TTSPython/install.sh` (installs for your
-  user only: app menu entry and a `ttspython` command; `uninstall.sh` removes it and asks about your data, and `uninstall.sh --delete-data` deletes it without asking). It also needs
+  user only: app menu entry, with **Show the mini bar** and **Start or stop dictation** as actions, and a `ttspython` command; `uninstall.sh` removes it and asks about your data, and `uninstall.sh --delete-data` deletes it without asking). It also needs
   `espeak-ng`, `libportaudio2` and `libxcb-cursor0` from your distribution; the installer tells you if one is missing.
   Built on Ubuntu 22.04, so it runs on distributions from 2022 or newer.
 
@@ -142,7 +143,9 @@ The first dictation downloads the Whisper model you picked (once; it stays in th
 
 ### Dictating into the editor
 1. Switch the top toggle from **Speak** to **Listen** (`Ctrl+M`).
-2. Press the red record button, speak, press it again. The text is added to the editor.
+2. Press the red record button, speak, press it again. The text goes in at the cursor, like typing. At the very end of the text, it gets a line of its own.
+
+Speech stops when you start dictating, wherever the text is going, so the microphone cannot type what the speakers say.
 
 ### Dictating into any app
 1. Press `Ctrl+Alt+D` (or the mic in mini mode) while your cursor is in another app.
@@ -181,14 +184,14 @@ With the ready-to-run app, use `TTSPython.exe --mini` (Windows) or `ttspython --
 ### Your own voice
 **Settings > Speech > Get more voices > Make my voice** copies your voice:
 1. Download the voice model once (762 MB).
-2. Press **Start recording**, read the statement on screen out loud, then press **Stop recording**. The app checks that the recording says the statement, makes the voice, and tells you how quickly this computer can speak in it.
+2. Press **Start recording**, read the statement on screen out loud, then press **Stop recording** (a recording has to last 6 to 40 seconds, and stops by itself at 40). You can name the voice first. The app checks that the recording says the statement, makes the voice, and tells you how quickly this computer can speak in it.
 3. Press **Hear it** to try it, or **Use this voice** to read with it.
 
 It is for your own voice only. The statement says that you agree to the copy and includes three code words, spread from start to end, that change on every try. The recording has to say the statement and little else, and there is no way to make a voice from a file. This is a safeguard against misuse, not proof of who is speaking, so please only use it for your own voice.
 
 The check uses your Whisper model, so if you have never dictated, that also downloads once when you stop recording (Small is about 480 MB). **Cancel** stops the whole thing and nothing is kept, as does closing the window.
 
-- **Privacy:** the recording, the voice and all the speech stay on your computer, in `%LOCALAPPDATA%\TTSPython\cloned-voices` (Windows) or `~/.local/share/ttspython/cloned-voices` (Linux). **Remove** deletes a voice and its recording. **Delete the voice model** frees the disk space and keeps your voices. If the model is gone, your voice stays selected and speaking with it says where to download it again.
+- **Privacy:** the recording, the voice and all the speech stay on your computer, in `%LOCALAPPDATA%\TTSPython\cloned-voices` (Windows) or `~/.local/share/ttspython/cloned-voices` (Linux). **Remove** deletes a voice and its recording. **Delete the voice model** frees the disk space and keeps your voices; it is refused while your voice is in use, so pick another voice first. If the model is gone some other way, your voice stays selected and speaking with it says where to download it again.
 - **What it needs:** on the test PC (Intel i5-12600K) it makes speech 2.2 to 2.4 times as fast as it plays, using about 3 processor cores and 1.3 GB of memory, which is released 2 minutes after speech ends. On a slower or busy computer it may pause between sentences; the app measures this when it makes the voice; exporting to a file is not affected, it only takes longer.
 - **Waiting:** on the test PC speech starts about half a second after you press Play, because you hear each sentence while it is being made, or about 3 seconds if the model has to load first (it is let go 2 minutes after speech ends). On a computer too slow to keep up, it waits longer before starting a sentence so that it does not stop in the middle of a word.
 - **Limits:** only tested in English, and not yet with a real microphone in a real room. Very short phrases sometimes gain a stray word (6 of 42 tries with one to three words, such as "Yes. All of them."), and digit strings such as phone numbers can come out wrong (555-0142 was heard as 535-042), so check anything important. Longer sentences had about 1.5% of words heard wrong.
@@ -219,6 +222,7 @@ All can be changed in **Settings > Shortcuts**.
 | Settings | `Ctrl+,` |
 
 While you dictate into another app, `Esc` cancels the dictation (only then; it is given back afterwards).
+In the editor, `Tab` types a tab, so `Ctrl+Tab` and `Ctrl+Shift+Tab` move to the next and previous control.
 
 ## Settings
 
@@ -234,6 +238,8 @@ The first time TTSPython 5 starts, it imports your old `tts_settings.json` from 
 The Settings window has these pages: **Appearance** (theme gallery, Performance Mode), **Speech** (voice and Get more voices, speed and volume, which apply as you move them, output device with Refresh, Test and Sound settings, sentence highlight), **Listen** (microphone with a live level meter, Whisper model, downloaded models (Whisper, the live preview and your own voice) with their size and a Delete button, **Unload now**, language, **Instant live preview** on or off, memory options, how dictation reaches other apps), **Clipboard**, **Shortcuts** (in-window and global, with **Enable global hotkeys**), **Mini mode** (with **Show the live waveform** and **Reset position**) and **General** (tray behavior, settings file location). **Save** keeps the changes and closes; **Cancel** undoes them, previews included; closing with unsaved changes asks. The Output, Model and Mic labels in the main window open the matching page.
 
 ## Troubleshooting
+
+Errors are written to the `logs` folder inside `%LOCALAPPDATA%\TTSPython` (Windows) or `~/.local/share/ttspython` (Linux): `ttspython.log`, and `crash.log` if the app itself crashed. They hold errors and program details, never what you read or dictate, and they stay on your computer unless you choose to send them with a bug report.
 
 ### No voices available
 - Download a natural voice in **Settings > Speech > Get more voices** (works on Windows and Linux).
@@ -267,7 +273,14 @@ The Settings window has these pages: **Appearance** (theme gallery, Performance 
 ### Dictation says the microphone sent only silence
 - The microphone is muted, or Windows does not let apps use it: **Settings > Privacy & security > Microphone**, turn on access for desktop apps.
 
+### A dictation could not be transcribed
+- The text that was already final is typed, and the recording is kept: press **Try again** on the Listen page, for example once you are back online, or after picking another model. It stays until you start a new dictation or quit.
+
+### The microphone stopped in the middle
+- If a microphone stops sending sound (unplugged, or its driver stopped), dictation stops and types what it heard, and the status bar says so.
+
 ### Dictation is not typed into another app
+- On the desktop or a page with nowhere to type, a paste lands nowhere and Windows does not say so. **Copy last dictation** in the tray menu puts the last text on the clipboard again. It is kept in memory only, and is gone when you quit.
 - A window running as administrator ignores simulated typing. TTSPython notices, leaves the text on the clipboard and says so: press `Ctrl+V`. The same happens if a paste fails.
 - Terminals often paste with `Shift+Insert`: change **Settings > Listen > Paste using** (also used with `wtype` on Wayland).
 - If you still hold `Alt` or `Shift` from the stop hotkey, the text is copied instead of pasted (pasting then would trigger another command): press `Ctrl+V`.

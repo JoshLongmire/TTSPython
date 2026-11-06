@@ -137,8 +137,8 @@ begin
     if ExpandConstant('{param:DELETEUSERDATA|0}') = '1' then
       DeleteUserData;
   end
-  else if MsgBox('Also delete your settings, unsaved text, voices, voice recordings and downloaded voices?' + #13#10 + #13#10 +
-                 'Choose No to keep them for next time. Speech recognition models are kept either way: ' +
+  else if MsgBox('Also delete your settings, unsaved text, voices, voice recordings, downloaded voices and the voice model?' + #13#10 + #13#10 +
+                 'Choose No to keep them for next time. Whisper models are kept either way: ' +
                  'delete those first in Settings > Listen.',
                  mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES then
     DeleteUserData;

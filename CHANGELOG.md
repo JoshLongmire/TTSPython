@@ -1,6 +1,31 @@
 # Changelog - TTSPython
 
 ## Unreleased
+- Dictation is harder to lose. If a recording cannot be transcribed (the model would not load, or a pass failed), the
+  text already final is typed and the recording is kept, with a **Try again** button on the Listen page. If a paste lands
+  nowhere, **Copy last dictation** in the tray menu brings it back (it is in memory only, and gone when you quit). If the
+  microphone is unplugged in the middle, dictation stops and types what it heard, instead of going on silently.
+- Dictating now stops speech wherever the text is going, so the microphone cannot type what the speakers say.
+- In the editor, dictated text goes in at the cursor, like typing. At the very end of the text it still gets its own line.
+- A hotkey pressed with the mini bar's menu open now types into the app underneath, not into the hidden main window.
+- Saving a document can no longer damage it: if another program is holding the file, the save fails and the file stays as
+  it was. Files in UTF-16 or UTF-32 without a marker are no longer saved over as nonsense, and UTF-32 with one reads
+  correctly. A broken character from damaged clipboard data no longer stops a save.
+- Settings: one bad value no longer resets all of them. A file held by another program at start is no longer replaced by
+  the defaults on the next save, and a size too big for the screen can no longer stop the app from starting.
+- Stopping a long recording on a microphone that runs at its own rate takes far less memory (2 minutes: 146 MB before, under
+  40 MB now, and half an hour was about 2.2 GB).
+- Your own voice: the speed no longer jumps in the middle of a sentence. The voice's pace is saved with it, so the first
+  sentence after a restart is at the right speed too. A second voice no longer gets the wrong name.
+- A window saved on a bigger monitor now fits a smaller one, and the main window and the voice window now fit a small laptop
+  screen (1366 x 768 at 150%). The microphone no longer stays open when Settings is hidden to the tray or the mini bar.
+- Quitting or closing **Get more voices** during a download now asks first. Find and Replace now works with a regular
+  expression that looks ahead or behind. Removing a queue item selects the next one, so Delete can be pressed again.
+- Distil now says that it only understands English when another language is picked, instead of quietly writing English.
+- Keyboard and screen readers: `Ctrl+Tab` leaves the editor, the status bar's device and model chips work from the keyboard,
+  status messages are announced, and more controls have names. The tray notice about still running now shows once.
+- A small log of errors now lives in the `logs` folder of the app's data folder, on your computer only (errors, never your
+  text), so that a problem in the packaged app can be found.
 - Fixed a crash at startup on a busy PC. Python's way of asking Windows for its version could bring down the whole app:
   9 of 180 starts crashed on a loaded test PC before the fix, and 0 of 180 after it.
 - Privacy: dictated text copied instead of pasted now also stays out of Windows clipboard history and cloud sync, and the
@@ -29,7 +54,7 @@
 - Live captions show Chinese without spaces between characters, and wrap it properly.
 - Live captions no longer run two words together now and then ("havevegetarian").
 - New Windows installer: installs for your user with no administrator rights, adds a Start menu entry, and keeps
-  your settings, voices and models when you upgrade or uninstall. The zip is still available.
+  your settings, voices and models when you upgrade (uninstalling asks). The zip is still available.
 - Dictating into a slow app no longer risks pasting your old clipboard: it now comes back 1.5 seconds after the
   paste instead of 0.4. If Windows blocks the paste, you are told right away.
 - Settings no longer asks about unsaved changes you did not make, or shows the wrong voice, when it opens before

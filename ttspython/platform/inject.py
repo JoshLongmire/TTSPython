@@ -204,17 +204,20 @@ class TextInjector(QObject):
             self.finished.emit(False, "Copied to clipboard. Press Ctrl+V to paste (install wtype to paste automatically).")
             return
         try:
-            subprocess.Popen(wtype_command(tool, self.keystroke), env=child_env())
+            typing = subprocess.Popen(wtype_command(tool, self.keystroke), env=child_env())
         except OSError:
             self.finished.emit(False, "Copied to clipboard. Press Ctrl+V to paste.")
             return
         self._busy = True
 
         def restore():
+            self._busy = False
+            if typing.poll():  # some desktops refuse it: the text stays on the clipboard, or it would be lost
+                self.finished.emit(False, "This desktop would not let the app paste. The text is on the clipboard: press Ctrl+V.")
+                return
             if snapshot is not None and self.clipboard.text() == text:
                 self._suppress(previous_text)
                 self.clipboard.setMimeData(snapshot)
-            self._busy = False
             self.finished.emit(True, "")
 
         QTimer.singleShot(RESTORE_DELAY_MS, restore)

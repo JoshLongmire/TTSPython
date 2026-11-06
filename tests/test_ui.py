@@ -24,6 +24,8 @@ LONG = " ".join(f"Sentence number {i} is here." for i in range(60))
 
 class FakeHotkeys(QObject):
     triggered = Signal(str)
+    available = True
+    reason = ""
 
     def __init__(self):
         super().__init__()

@@ -159,9 +159,9 @@ def test_the_service_notices_a_dead_preview_says_so_once_and_carries_on():
 
 # --- resampling -------------------------------------------------------------------------------
 def resample(*args):
-    from ttspython.core.stt.recorder import resample as recorder_resample  # the one dictation uses
+    from ttspython.core.resample import resample as shared_resample  # the one dictation uses
 
-    return recorder_resample(*args)
+    return shared_resample(*args)
 
 
 def test_resampling_steps_evenly_even_on_short_blocks():

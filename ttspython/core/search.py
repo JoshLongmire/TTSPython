@@ -60,13 +60,14 @@ def _first_nonempty(pattern, text, pos):
     return None
 
 
-def replacement_for(match_text, term, replacement, case_sensitive=False, use_regex=False):
-    """Expand the replacement for one match (regex groups only in regex mode)."""
-    if not use_regex:
-        return replacement
+def replacement_at(text, start, end, term, replacement, case_sensitive=False, use_regex=False):
+    """The replacement for the match at text[start:end] (regex groups only in regex mode), or None
+    if that is not a match. It looks at the whole text: a pattern can depend on what is around it."""
     pattern = compile_pattern(term, case_sensitive, use_regex)
-    m = pattern.fullmatch(match_text)
-    if not m:
+    m = pattern.match(text, start)
+    if not m or m.end() != end:
+        return None
+    if not use_regex:
         return replacement
     try:
         return m.expand(replacement)

@@ -160,14 +160,26 @@ class SpeechTextEdit(TextFileDropMixin, QPlainTextEdit):
         cursor.select(QTextCursor.Document)
         cursor.removeSelectedText()
 
-    def append_line(self, text):
-        cursor = QTextCursor(self.document())
-        cursor.movePosition(QTextCursor.End)
-        current = self.toPlainText()
-        prefix = "" if not current or current.endswith("\n") else "\n"
-        cursor.insertText(prefix + text + "\n")
+    def add_dictation(self, text):
+        """At the cursor, like typing. At the very end of the text, on a line of its own."""
+        cursor = self.textCursor()
+        if cursor.atEnd() and not cursor.hasSelection():
+            current = self.toPlainText()
+            cursor.insertText(("" if not current or current.endswith("\n") else "\n") + text + "\n")
+        else:
+            document = self.document()
+            before = document.characterAt(cursor.selectionStart() - 1) if cursor.selectionStart() else " "
+            after = document.characterAt(cursor.selectionEnd())
+            cursor.insertText(f"{'' if before.isspace() else ' '}{text}{'' if after.isspace() or not after else ' '}")
         self.setTextCursor(cursor)
         self.ensureCursorVisible()
+
+    def keyPressEvent(self, event):  # noqa: N802
+        # Tab types a tab here, so the keyboard needs another way out of the editor.
+        if event.key() in (Qt.Key_Tab, Qt.Key_Backtab) and event.modifiers() & Qt.ControlModifier:
+            self.focusNextPrevChild(event.key() == Qt.Key_Tab)
+            return
+        super().keyPressEvent(event)
 
 
 class FindBar(QFrame):
@@ -319,19 +331,16 @@ class FindBar(QFrame):
     def replace_one(self):
         term = self.find_edit.text()
         cursor = self.editor.textCursor()
-        selected = cursor.selectedText().replace("\u2029", "\n")  # how Qt writes a line break here
-        if selected:
+        if cursor.hasSelection():
+            text = self.editor.toPlainText()
             try:
-                pattern = search.compile_pattern(term, **self._opts())
+                repl = search.replacement_at(text, u16_to_py(text, cursor.selectionStart()),
+                                             u16_to_py(text, cursor.selectionEnd()), term,
+                                             self.replace_edit.text(), **self._opts())
             except search.SearchError as exc:
                 self.message.emit(str(exc))
                 return
-            if pattern.fullmatch(selected):
-                try:
-                    repl = search.replacement_for(selected, term, self.replace_edit.text(), **self._opts())
-                except search.SearchError as exc:
-                    self.message.emit(str(exc))
-                    return
+            if repl is not None:
                 cursor.insertText(repl)
         self.find(False)
 

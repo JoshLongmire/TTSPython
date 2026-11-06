@@ -6,7 +6,7 @@ import threading
 from PySide6.QtCore import QObject, QRect, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QFontMetrics, QPainter
 from PySide6.QtWidgets import (
-    QComboBox, QDialog, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QProgressBar, QPushButton,
+    QComboBox, QDialog, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMessageBox, QProgressBar, QPushButton,
     QStyle, QStyledItemDelegate, QVBoxLayout,
 )
 
@@ -98,6 +98,7 @@ class VoiceBrowser(QDialog):
         top = QHBoxLayout()
         self.language = QComboBox()
         self.language.setToolTip("Language")
+        self.language.setAccessibleName("Language")
         languages = sorted({v.language for v in piper.catalog()})
         for name in languages:
             self.language.addItem(name, name)
@@ -105,6 +106,7 @@ class VoiceBrowser(QDialog):
         self.language.currentIndexChanged.connect(self._fill)
         self.filter = QLineEdit()
         self.filter.setPlaceholderText("Filter by name, country or quality")
+        self.filter.setAccessibleName("Filter voices")
         self.filter.setClearButtonEnabled(True)
         mute_clear_button(self.filter)
         self.filter.textChanged.connect(self._fill)
@@ -117,6 +119,7 @@ class VoiceBrowser(QDialog):
         lay.addLayout(top)
 
         self.list = QListWidget()
+        self.list.setAccessibleName("Voices")
         self.list.setItemDelegate(VoiceDelegate(self.list))
         self.list.setMouseTracking(True)
         self.list.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)  # long names are shortened instead
@@ -219,7 +222,7 @@ class VoiceBrowser(QDialog):
         busy = self._downloading is not None
         have = bool(key) and self._installed(key)
         self.download_btn.setVisible(not have)
-        self.download_btn.setEnabled(bool(key) and not busy)
+        self.download_btn.setEnabled(bool(key) and not busy and piper.program_available())
         self.use_btn.setVisible(have)
         self.use_btn.setEnabled(have and piper.PREFIX + key != self._current)
         self.remove_btn.setEnabled(have and not busy)
@@ -248,14 +251,21 @@ class VoiceBrowser(QDialog):
 
         def work():
             try:
-                vid = self._install(key, lambda d, t, what: relay.progress.emit(d, t, what), cancel)
-                relay.done.emit(vid, "")
+                vid = self._install(key, lambda d, t, what: self._emit(relay.progress, d, t, what), cancel)
+                self._emit(relay.done, vid, "")
             except DownloadCancelled:
-                relay.done.emit("", "Download cancelled.")
+                self._emit(relay.done, "", "Download cancelled.")
             except Exception as exc:
-                relay.done.emit("", f"Could not download this voice: {exc}")
+                self._emit(relay.done, "", f"Could not download this voice: {exc}")
 
         threading.Thread(target=work, name="voice-download", daemon=True).start()
+
+    @staticmethod
+    def _emit(signal, *args):
+        try:
+            signal.emit(*args)
+        except RuntimeError:  # the window was closed meanwhile
+            pass
 
     def _on_progress(self, done, total, what):
         self.progress.setRange(0, max(1, total))
@@ -304,10 +314,24 @@ class VoiceBrowser(QDialog):
         self._current = voice_id
         self._fill()
 
+    @property
+    def downloading(self):
+        return self._downloading is not None
+
+    def _may_close(self):
+        if self._cancel is None or self._cancel.is_set():
+            return True
+        return QMessageBox.question(self, "Stop the download?", "Closing this window stops the download. Stop it?",
+                                    QMessageBox.Yes | QMessageBox.No, QMessageBox.No) == QMessageBox.Yes
+
     def closeEvent(self, event):  # noqa: N802
+        if not self._may_close():
+            event.ignore()
+            return
         self._cancel_download()
         super().closeEvent(event)
 
     def reject(self):  # Esc: closes without a closeEvent
-        self._cancel_download()
-        super().reject()
+        if self._may_close():
+            self._cancel_download()
+            super().reject()

@@ -21,6 +21,7 @@ from ttspython.core.stt import preview, service
 from ttspython.core.tts import clone, piper
 from ttspython.core.tts.render import Cancelled
 from ttspython.platform import inject
+from ttspython.ui import clone_dialog
 from ttspython.ui.mini import LiveCaption
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -385,7 +386,7 @@ def test_enter_in_the_name_box_does_not_start_recording(model, qtbot):  # noqa: 
     assert not recorder.running and dlg.isVisible()
 
 
-def test_the_window_works_with_a_screen_reader(model, qtbot):  # noqa: F811
+def test_the_window_works_with_a_screen_reader(model, qtbot, monkeypatch):  # noqa: F811
     voice()
     dlg = window(qtbot)
     assert dlg.statement.focusPolicy() != Qt.NoFocus
@@ -395,7 +396,7 @@ def test_the_window_works_with_a_screen_reader(model, qtbot):  # noqa: F811
     assert dlg.name_label.buddy() is dlg.name
     assert dlg.list_label.buddy() is dlg.list
     announced = []
-    dlg._announce = announced.append
+    monkeypatch.setattr(clone_dialog, "announce", lambda _widget, text: announced.append(text))
     dlg._set_status("Something happened.")
     assert announced == ["Something happened."]
 
@@ -800,5 +801,5 @@ def test_uninstalling_offers_to_remove_private_data_and_defaults_to_no():
 def test_the_linux_uninstaller_offers_it_too():
     with open(os.path.join(ROOT, "packaging", "linux", "uninstall.sh"), encoding="utf-8") as f:
         script = f.read()
-    assert "--delete-data" in script and ".local/share/ttspython" in script
+    assert "--delete-data" in script and "$HOME/.local/share}/ttspython" in script
 

@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (
 from .. import __version__
 from .editor import EditorCard
 from .panels import ListenPanel, QueuePanel, TransportBar
-from .widgets import AppMark, ElidedLabel, Segmented, Toast, ToggleSwitch, action_button
+from .widgets import AppMark, ElidedLabel, Segmented, Toast, ToggleSwitch, action_button, announce
 
 
 class MainWindow(QMainWindow):
@@ -20,7 +20,7 @@ class MainWindow(QMainWindow):
         super().__init__(parent)
         self.actions = actions
         self.setWindowTitle("TTSPython")
-        self.setMinimumSize(760, 500)
+        self.setMinimumSize(760, 440)  # 1366 x 768 at 150% leaves about 460
 
         root = QWidget()
         root.setObjectName("Root")
@@ -155,6 +155,9 @@ class MainWindow(QMainWindow):
     # --- helpers ------------------------------------------------------------------------
     def set_status(self, text):
         self.status_label.setText(text)
+
+    def announce(self, text):
+        announce(self.status_label, text)
 
     def show_toast(self, text, ms=2600):
         self.toast.show_message(text, ms)

@@ -11,8 +11,8 @@ import numpy as np
 from ..chunking import split_chunks
 from ..events import EventEmitter
 from ..platform import com_apartment
+from ..resample import resample
 from ..settings import atomic_replace
-from .player import resample
 from .render import Cancelled, create_renderer
 from .stretch import speed_factor, stretch
 

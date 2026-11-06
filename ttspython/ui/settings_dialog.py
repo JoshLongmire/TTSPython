@@ -2,11 +2,12 @@
 from __future__ import annotations
 
 import copy
+import sys
 
 from PySide6.QtCore import QEvent, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QKeySequence, QPainter
 from PySide6.QtWidgets import (
-    QButtonGroup, QComboBox, QDialog, QFrame, QGridLayout, QHBoxLayout, QKeySequenceEdit, QLabel, QLineEdit,
+    QAbstractButton, QButtonGroup, QComboBox, QDialog, QFrame, QGridLayout, QHBoxLayout, QKeySequenceEdit, QLabel, QLineEdit,
     QListWidget, QListWidgetItem, QMessageBox, QPushButton, QRadioButton, QScrollArea,
     QSpinBox, QStackedWidget, QVBoxLayout, QWidget,
 )
@@ -118,7 +119,8 @@ class SettingRow(QFrame):
             control = holder
         self.text, self.control = text, control
         for widget in (control, *control.findChildren(QWidget)):  # what a screen reader calls it
-            if not widget.accessibleName() and not getattr(widget, "text", str)():
+            says_itself = isinstance(widget, (QAbstractButton, QLabel)) and widget.text()
+            if not widget.accessibleName() and not says_itself:
                 widget.setAccessibleName(title)
         self._stacked = None
         self._place(False)
@@ -175,6 +177,18 @@ class ThemeGrid(QWidget):
         card_w = (self.cards[0].width() if self.cards else 118) + self._grid.spacing()
         self._arrange(max(1, min(6, (event.size().width() + self._grid.spacing()) // card_w)))
         super().resizeEvent(event)
+
+
+def command_name():
+    """What starts the app from a command line or a desktop keyboard shortcut."""
+    return "ttspython" if getattr(sys, "frozen", False) else "python TTSPython.py"
+
+
+def _same_device(a, b):
+    """The same device can get another number when something else is plugged in."""
+    if isinstance(a, dict) and isinstance(b, dict) and (a.get("name") or b.get("name")):
+        return (a.get("name"), a.get("hostapi")) == (b.get("name"), b.get("hostapi"))
+    return a == b
 
 
 class MicMeter(Waveform):
@@ -441,6 +455,7 @@ class SettingsDialog(QDialog):
         self.model_note.setObjectName("ErrorText")
         self.model_note.setWordWrap(True)
         self.model_note.hide()  # shown only with a message (an empty label still takes a row)
+        self._language_note = False
         lay.addWidget(self.model_note)
         self.models_box = QVBoxLayout()
         self.models_box.setSpacing(2)
@@ -451,6 +466,8 @@ class SettingsDialog(QDialog):
         for code, label in settings_mod.STT_LANGUAGES:
             self.language.addItem(label, code)
         self._row(lay, "Language", self.language, "English is fastest. Auto-detect works for any language, without the instant preview.")
+        self.model.currentIndexChanged.connect(self._update_language_note)
+        self.language.currentIndexChanged.connect(self._update_language_note)
         self.live_preview = ToggleSwitch()
         self._row(lay, "Instant live preview", self.live_preview,
                   "While you dictate into another app, each word shows about half a second after you say it, "
@@ -529,7 +546,7 @@ class SettingsDialog(QDialog):
         self._global_available = available
         if not available:
             banner = QLabel(reason + " You can bind these commands in your desktop's keyboard settings instead:\n"
-                            "TTSPython.py --toggle-dictation, --speak-clipboard, --stop, --pause, --mini, --show")
+                            f"{command_name()} --toggle-dictation, --speak-clipboard, --stop, --pause, --mini, --show")
             banner.setObjectName("Banner")
             banner.setWordWrap(True)
             banner.setTextInteractionFlags(Qt.TextSelectableByMouse)
@@ -698,7 +715,8 @@ class SettingsDialog(QDialog):
         changed = {}
         for key, value in form.items():
             before = self.saved_values.get(key)
-            if before != value:
+            same = _same_device(before, value) if key in ("tts_output_device", "stt_input_device") else before == value
+            if not same:
                 changed[key] = value
         return changed
 
@@ -958,6 +976,25 @@ class SettingsDialog(QDialog):
                 self._save_and_close()
                 return
         super().reject()
+
+    def hideEvent(self, event):  # noqa: N802
+        self.meter.stop()  # it goes with the main window, to the tray or the pill: the microphone must not stay open
+        super().hideEvent(event)
+
+    def showEvent(self, event):  # noqa: N802
+        super().showEvent(event)
+        self._restart_meter()
+
+    def _update_language_note(self, *_):
+        """Distil is English only: with another language it says nothing and writes English."""
+        wrong = str(self.model.currentData() or "").startswith("distil") and self.language.currentData() != "en"
+        if wrong:
+            self.model_note.setText(f"Distil only understands English. For {self.language.currentText()}, pick another model.")
+            self._language_note = True
+        elif self._language_note:
+            self.model_note.clear()
+            self._language_note = False
+        self.model_note.setVisible(bool(self.model_note.text()))
 
     def done(self, result):  # noqa: D401
         """Every way of closing ends here: drop unsaved previews."""

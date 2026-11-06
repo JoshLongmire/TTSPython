@@ -171,6 +171,7 @@ QStatusBar { background: ${window}; color: ${muted}; border-top: ${border_w}px s
 QStatusBar QLabel { color: ${muted}; }
 QStatusBar::item { border: none; }
 #StatusChip { color: ${muted}; padding: 2px 8px; border-radius: 8px; }
+ElidedLabel:focus { background: ${surface2}; border-radius: 8px; }
 #StatusText { padding-left: 14px; }
 
 /* Splitter */

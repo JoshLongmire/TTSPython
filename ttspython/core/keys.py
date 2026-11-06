@@ -125,7 +125,7 @@ def tk_to_portable(binding):
         if key.isalpha() and key.isupper() and "Shift" not in mods:
             mods.append("Shift")
         key_name = key.upper()
-    elif lower.startswith("f") and lower[1:].isdigit() and 1 <= int(lower[1:]) <= 24:
+    elif lower.startswith("f") and lower[1:].isdecimal() and 1 <= int(lower[1:]) <= 24:
         key_name = key.upper()
     else:
         return None
@@ -239,7 +239,7 @@ def parse_combo(text):
         return None
     if len(key) == 1:
         key = key.upper()
-    elif not (key in KNOWN_KEY_NAMES or (key[0] == "F" and key[1:].isdigit() and 1 <= int(key[1:]) <= 35)):
+    elif not (key in KNOWN_KEY_NAMES or (key[0] == "F" and key[1:].isdecimal() and 1 <= int(key[1:]) <= 35)):
         return None
     return frozenset(mods), key
 

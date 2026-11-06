@@ -34,9 +34,10 @@ import threading
 import numpy as np
 
 from ..events import EventEmitter
+from ..resample import resample
 from ..transcript import normalize_transcript_text
 from . import preview as preview_mod
-from .recorder import Recorder, resample
+from .recorder import Recorder
 
 log = logging.getLogger(__name__)
 
@@ -73,6 +74,9 @@ def friendly_audio_error(exc):
     return text
 
 
+RETRY_HINT = "Your recording is kept: press Try again on the Listen page. A new dictation replaces it."
+QUIET_PEAK = 0.02  # a recording quieter than this all through holds no speech
+
 _NUMBER_WORDS = ("zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen "
                  "fifteen sixteen seventeen eighteen nineteen twenty").split()
 
@@ -80,7 +84,7 @@ _NUMBER_WORDS = ("zero one two three four five six seven eight nine ten eleven t
 def _plain(word):
     """Lower case without punctuation; Whisper's digits as the preview spells them ("3" -> "three")."""
     plain = "".join(ch for ch in word.lower().replace("\u2019", "'") if ch.isalnum() or ch == "'")
-    return _NUMBER_WORDS[int(plain)] if plain.isdigit() and int(plain) < len(_NUMBER_WORDS) else plain
+    return _NUMBER_WORDS[int(plain)] if plain.isdecimal() and int(plain) < len(_NUMBER_WORDS) else plain
 
 
 def _same_word(a, b):
@@ -231,7 +235,8 @@ def delete_model(name, scan=None):
 
 def model_complete(folder):
     """True when a downloaded model folder has every file a load needs."""
-    return all(os.path.isfile(os.path.join(folder, f)) for f in REQUIRED_FILES)
+    return (all(os.path.isfile(os.path.join(folder, f)) for f in REQUIRED_FILES)
+            and any(os.path.isfile(os.path.join(folder, f"vocabulary.{kind}")) for kind in ("json", "txt")))
 
 
 _SINK = []
@@ -467,7 +472,9 @@ class SttService:
         self._checked = ("", 0.0)  # Whisper's text after the settled part, and the audio second it reaches
         self._pass_now = threading.Event()
         self._caption_lock = threading.Lock()
+        self._kept = None  # (audio, target) of a recording that could not be transcribed: Try again
         self.recorder.on_limit = lambda: self.stop()
+        self.recorder.on_lost = self._microphone_lost
 
     @property
     def state(self):
@@ -517,6 +524,8 @@ class SttService:
                 self._schedule_unload()  # the timer was cancelled above
             else:
                 self._target = target
+                dropped = self._kept is not None
+                self._kept = None
                 self._load_failed = None
                 self._cancelled = False
                 self._settled_text = ""
@@ -530,6 +539,8 @@ class SttService:
                 session = self._recording = self._session
                 self._set_state(SttState.RECORDING)
                 self._start_preview(session)
+                if dropped:
+                    self.events.emit("retry_available", False)
         if failure:  # after the lock: the message box runs its own event loop, where a hotkey can call start again
             self.events.emit("error", failure)
             return False
@@ -590,13 +601,52 @@ class SttService:
         with self._lock:
             if self._state is not SttState.RECORDING:
                 return False
-            audio = self.recorder.stop()
+            try:
+                audio = self.recorder.stop()
+            except Exception as exc:  # out of memory, on a very long recording
+                self._stop_preview()
+                self._session += 1
+                self._set_state(SttState.IDLE)
+                self.events.emit("error", f"Could not finish the recording: {exc}")
+                return False
             self._stop_preview()
             target = self._target
             self._session += 1
             self._set_state(SttState.TRANSCRIBING)
         self._pool.submit(self._transcribe, audio, target)
         return True
+
+    def _microphone_lost(self):
+        """Unplugged, or its driver stopped: what was said so far is still typed."""
+        if self.stop():
+            self.events.emit("model_status", "The microphone stopped responding, so dictation stopped there.")
+
+    def retry(self):
+        """Transcribe again the recording kept when transcribing failed. False if there is none."""
+        with self._lock:
+            if self._kept is None or self._state is not SttState.IDLE:
+                return False
+            audio, target = self._kept
+            self._kept = None
+            self._cancelled = False
+            self._last_pass = None
+            self.cache.cancel_download.clear()
+            self._session += 1
+            self._set_state(SttState.TRANSCRIBING)
+        self.events.emit("retry_available", False)
+        self._pool.submit(self._transcribe, audio, target)
+        return True
+
+    def _keep_for_retry(self, audio, target, message):
+        """Words must not be lost to a model that would not load or a pass that failed. Text that
+        was already final is delivered now; only the rest waits."""
+        settled, self._settled_text = self._settled_text, ""
+        settled = normalize_transcript_text(settled) if settled else ""
+        if settled:
+            self.events.emit("transcript_ready", settled, target)
+        self._kept = (audio, target)
+        self.events.emit("retry_available", True)
+        self.events.emit("error", f"{message} {RETRY_HINT}")
 
     def cancel(self):
         """Throw the recording away: nothing is typed. Works while recording or transcribing."""
@@ -772,6 +822,9 @@ class SttService:
         if cut:
             self._settled_text = _joined([self._settled_text, *(t for _s, _e, t in segments[:cut])])
             self._settled_samples += cut_sample
+        elif not segments and seconds > WHOLE_SECONDS - SETTLE_GAP and float(np.abs(audio).max()) < QUIET_PEAK:
+            # A long silence: it would be converted and listened to again on every pass.
+            self._settled_samples += audio.size - rate  # a word may be starting in the last second
         return _joined(t for _s, _e, t in segments[cut:])
 
     def _live_loop(self, session):
@@ -828,7 +881,7 @@ class SttService:
                 return
             failed, self._load_failed = self._load_failed, None
             if failed and failed[0] == self.model:
-                self.events.emit("error", f"Could not transcribe: the {self.model} model failed to load ({failed[1]})")
+                self._keep_for_retry(audio, target, f"Could not transcribe: the {self.model} model failed to load ({failed[1]}).")
                 return
             tail = self._reusable_tail(audio)
             if tail is None:
@@ -847,7 +900,8 @@ class SttService:
         except DownloadCancelled:
             pass  # the user knows: cancel() said so
         except Exception as exc:
-            self.events.emit("error", f"Failed to transcribe: {exc}")
+            if not self._cancelled:
+                self._keep_for_retry(audio, target, f"Failed to transcribe: {exc}.")
         finally:
             self._set_state(SttState.IDLE)
             if self.unload_when_idle:

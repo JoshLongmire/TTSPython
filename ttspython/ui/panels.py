@@ -388,6 +388,10 @@ class ListenPanel(QFrame):
         col.addWidget(self.title)
         col.addWidget(self.status)
         lay.addLayout(col, 1)
+        self.retry = QPushButton("Try again")
+        self.retry.setToolTip("Transcribe the recording that could not be transcribed. A new dictation replaces it.")
+        self.retry.hide()  # only while a recording is kept
+        lay.addWidget(self.retry)
         self.cancel = QPushButton("Cancel")
         self.cancel.setToolTip("Stop the download and throw this recording away. It starts again the next time you dictate.")
         self.cancel.hide()  # only while a model is downloading

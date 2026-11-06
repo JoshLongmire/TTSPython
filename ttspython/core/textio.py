@@ -3,7 +3,8 @@ from __future__ import annotations
 
 import contextlib
 import os
-import shutil
+import re
+import uuid
 from dataclasses import dataclass
 
 from .settings import atomic_replace
@@ -28,7 +29,11 @@ def _detect_newline(text):
     return os.linesep
 
 
-_UTF16_BOMS = ((b"\xff\xfe", "utf-16-le"), (b"\xfe\xff", "utf-16-be"))
+# UTF-32 first: its little-endian mark starts with UTF-16's.
+_BOMS = ((b"\xff\xfe\x00\x00", "utf-32-le"), (b"\x00\x00\xfe\xff", "utf-32-be"),
+         (b"\xff\xfe", "utf-16-le"), (b"\xfe\xff", "utf-16-be"), (b"\xef\xbb\xbf", "utf-8"))
+_BOM_BY_ENCODING = {encoding: mark for mark, encoding in _BOMS}
+_LONE_SURROGATE = re.compile("[\ud800-\udfff]")
 
 
 def _decode_marked(raw, encoding):
@@ -48,12 +53,10 @@ def _looks_misread(text):
 
 def decode_text(raw: bytes) -> TextDocument:
     """Decode tolerantly (BOM / UTF-16 BOM / UTF-8 / cp1252 / replace)."""
-    utf16 = next((enc for mark, enc in _UTF16_BOMS if raw.startswith(mark)), None)
+    marked = next(((mark, enc) for mark, enc in _BOMS if raw.startswith(mark)), None)
     lossy = False
-    if utf16:
-        (text, lossy), enc, bom = _decode_marked(raw[2:], utf16), utf16, True
-    elif raw.startswith(b"\xef\xbb\xbf"):
-        (text, lossy), enc, bom = _decode_marked(raw[3:], "utf-8"), "utf-8", True
+    if marked:
+        (text, lossy), enc, bom = _decode_marked(raw[len(marked[0]):], marked[1]), marked[1], True
     else:
         bom = False
         for enc in ("utf-8", "cp1252"):
@@ -65,6 +68,8 @@ def decode_text(raw: bytes) -> TextDocument:
         else:
             text, enc, lossy = raw.decode("utf-8", errors="replace"), "utf-8", True
     if enc == "cp1252" and _looks_misread(text):
+        lossy = True
+    if not bom and b"\x00" in raw:  # text has no such byte: UTF-16 or UTF-32 without a mark, or not text at all
         lossy = True
     newline = _detect_newline(text)
     text = text.replace("\r\n", "\n")
@@ -83,7 +88,8 @@ def read_text(path) -> str:
 def encode_text(text, encoding="utf-8", newline=None, bom=False):
     """Return (bytes, encoding actually used). Falls back to UTF-8 if the text does not fit."""
     newline = newline or os.linesep
-    body = text.replace("\r\n", "\n")
+    # A broken character (half of a pair, from damaged clipboard data) cannot be stored in any encoding.
+    body = _LONE_SURROGATE.sub("\ufffd", text).replace("\r\n", "\n")
     if newline != "\n":
         body = body.replace("\n", newline)
     try:
@@ -92,7 +98,7 @@ def encode_text(text, encoding="utf-8", newline=None, bom=False):
         data = body.encode("utf-8")
         encoding = "utf-8"
     if bom:
-        data = {"utf-8": b"\xef\xbb\xbf", "utf-16-le": b"\xff\xfe", "utf-16-be": b"\xfe\xff"}.get(encoding, b"") + data
+        data = _BOM_BY_ENCODING.get(encoding, b"") + data
     return data, encoding
 
 
@@ -106,9 +112,15 @@ def write_text_file(path, text, encoding="utf-8", newline=None, bom=False):
         raise PermissionError("This file is read-only. Use Save as to keep your text in another file.")
     if os.path.islink(path):
         path = os.path.realpath(path)  # save through the link, do not replace it with a file
-    tmp = path + ".part"
+    # A name of its own, never someone's file. Private from the start if the file is private.
+    tmp = f"{path}.{uuid.uuid4().hex[:8]}.part"
     try:
-        with open(tmp, "wb") as f:
+        mode = os.stat(path).st_mode & 0o777
+    except OSError:
+        mode = 0o666  # a new file: the user's umask applies
+    try:
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0), mode)
+        with os.fdopen(fd, "wb") as f:
             f.write(data)
             f.flush()
             os.fsync(f.fileno())
@@ -116,11 +128,8 @@ def write_text_file(path, text, encoding="utf-8", newline=None, bom=False):
         with contextlib.suppress(OSError):
             os.remove(tmp)
         raise
-    if os.path.exists(path):
-        with contextlib.suppress(OSError):
-            shutil.copymode(path, tmp)  # a private file stays private
     try:
-        atomic_replace(tmp, path)
+        atomic_replace(tmp, path, may_copy=False)
     except OSError:  # the editor still holds the text and says the save failed: leave nothing behind
         with contextlib.suppress(OSError):
             os.remove(tmp)
