@@ -17,8 +17,10 @@
   the app makes a copy of your voice, on your computer. It only works from you reading the statement, with fresh code
   words each time, so a voice cannot be made from a file or an old recording. The voice model is an optional 762 MB
   download. On the test PC (Intel i5-12600K) it made speech 2.2 to 2.4 times as fast as it plays, using about 3 processor
-  cores and 1.2 GB of memory, which is released 2 minutes after speech ends. The first sentence takes about 3 seconds, or
-  about 10 after a pause while the model loads. Slower PCs may pause between sentences, and the app measures this and tells you.
+  cores and 1.3 GB of memory, which is released 2 minutes after speech ends. You hear each sentence while it is being
+  made, so speech starts in about 0.5 seconds, or about 3 when the model has to load first (measured on that PC: a
+  sentence took 1.7 s and a load 7.5 s when each sentence was made in full first). Slower PCs wait longer before
+  starting a sentence and may pause between sentences, and the app measures this and tells you.
   A speaker recognition model scored three copies 0.80 to 0.90 against the real speaker (1 is identical) and at most
   0.64 against other people. Only tested in English. Very short phrases sometimes gain a stray word, and phone numbers
   can come out wrong.

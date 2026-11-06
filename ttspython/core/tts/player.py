@@ -21,7 +21,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from ..resample import resample
+from ..resample import StreamResampler, resample
 from .stretch import Stretcher, speed_factor
 
 PAUSE_STOP_SECONDS = 10  # a stream paused this long is stopped (restarted on resume)
@@ -44,26 +44,74 @@ class _Segment:
     """Speech (native set) plays through a Stretcher at the target rate; silence and end
     markers are copied as they are (offset counts what has played)."""
 
-    __slots__ = ("samples", "marker", "offset", "native", "stretcher", "announced")
+    __slots__ = ("samples", "marker", "offset", "native", "stretcher", "announced", "growing", "held", "expected")
 
-    def __init__(self, samples, marker, native=None, rate=0):
+    def __init__(self, samples, marker, native=None, rate=0, growing=False, expected=0):
         self.samples = samples
         self.marker = marker
         self.offset = 0
         self.native = native
-        self.stretcher = Stretcher(samples, rate) if native else None
+        self.stretcher = Stretcher(samples, rate, growing=growing) if native else None
         self.announced = False
+        self.growing = growing  # still being made...
+        self.held = growing     # ...and it waits, in silence, until there is enough to start
+        self.expected = expected  # how long it is likely to be, while it is being made
+
+    def _size(self):
+        return max(self.samples.size, self.expected) if self.growing else self.samples.size
+
+    def played(self):
+        return self.stretcher.pos if self.stretcher is not None else self.offset
 
     def fraction(self):
         """How far into the chunk playback is, 0..1."""
-        if self.stretcher is not None:
-            return self.stretcher.fraction()
-        return self.offset / max(1, self.samples.size)
+        return min(1.0, self.played() / max(1, self._size()))
 
     def remaining(self, target_wpm):
         if self.stretcher is not None:
-            return self.stretcher.remaining(speed_factor(target_wpm, self.native))
-        return self.samples.size - self.offset
+            not_made = max(0, self._size() - self.samples.size)
+            return self.stretcher.remaining(speed_factor(target_wpm, self.native)) + not_made
+        return self._size() - self.offset
+
+
+class AudioFeed:
+    """One chunk being played while it is still being made. Used only by the thread making it."""
+
+    def __init__(self, player, segment, rate, source_rate):
+        self._player = player
+        self._segment = segment
+        self._rate = rate
+        self._resampler = StreamResampler(source_rate, rate)
+
+    @property
+    def factor(self):
+        return speed_factor(self._player.target_wpm, self._segment.native)
+
+    @property
+    def buffered_seconds(self):
+        """Audio made and not heard yet, in seconds of listening at the present speed."""
+        return self._player.feed_left(self._segment) / float(self._rate) / (self.factor or 1.0)
+
+    @property
+    def waiting(self):
+        return self._segment.held
+
+    def add(self, pcm_int16):
+        self._grow(self._resampler.feed(pcm_int16.astype(np.float32) * (1.0 / 32768.0)))
+
+    def _grow(self, samples):
+        if samples.size:
+            # Copied here and swapped under the lock, so the audio thread never waits for the copy.
+            self._player.feed_grow(self._segment, np.concatenate([self._segment.samples, samples]))
+
+    def release(self):
+        """There is enough to start, or to carry on after running out."""
+        self._segment.held = False
+
+    def finish(self, native_wpm=None):
+        """That was all of it. native_wpm: the pace it turned out to have."""
+        self._grow(self._resampler.finish())
+        self._player.feed_end(self._segment, native_wpm)
 
 
 class AudioPlayer:
@@ -91,6 +139,7 @@ class AudioPlayer:
         self._paused_since = None
         self._stream_stopped = False
         self.callback_errors = 0
+        self.starved = 0  # how many times speech ran out while it was still being made
 
     # --- configuration --------------------------------------------------------
     @property
@@ -299,14 +348,15 @@ class AudioPlayer:
             self.wait_open()
             with self._lock:
                 if marker is not None and marker.generation < self._min_generation:
-                    return False
+                    return None
                 if self._stream is None:
                     continue
-                self._segments.append(_Segment(samples, marker, **segment))
+                added = _Segment(samples, marker, **segment)
+                self._segments.append(added)
                 self._last_active = time.monotonic()
                 if len(self._segments) == 1:
                     self._last_progress = time.monotonic()
-                return True
+                return added
         raise RuntimeError("Audio output closed unexpectedly")
 
     def enqueue(self, pcm_int16, sample_rate, marker, native_wpm=None):
@@ -315,11 +365,38 @@ class AudioPlayer:
         samples = pcm_int16.astype(np.float32)
         samples *= 1.0 / 32768.0
         samples = resample(samples, sample_rate, self._rate)
-        return self._append(samples, marker, native=native_wpm, rate=self._rate)
+        return self._append(samples, marker, native=native_wpm, rate=self._rate) is not None
+
+    def open_feed(self, sample_rate, marker, native_wpm, expected_seconds=0.0):
+        """Start a chunk that is still being made. It takes its place in the queue and plays once
+        released. Returns an AudioFeed, or None if the marker belongs to a stopped job."""
+        self.wait_open()
+        rate = self._rate
+        segment = self._append(np.zeros(0, dtype=np.float32), marker, native=native_wpm, rate=rate, growing=True,
+                               expected=int(expected_seconds * rate))
+        return AudioFeed(self, segment, rate, sample_rate) if segment is not None else None
+
+    def feed_left(self, segment):
+        with self._lock:
+            return max(0.0, segment.samples.size - segment.played())
+
+    def feed_grow(self, segment, samples):
+        with self._lock:
+            segment.samples = samples
+            if segment.stretcher is not None:
+                segment.stretcher.grow(samples)
+
+    def feed_end(self, segment, native_wpm=None):
+        with self._lock:
+            segment.growing = segment.held = False
+            if segment.stretcher is not None:
+                segment.stretcher.end()
+            if native_wpm:
+                segment.native = native_wpm
 
     def enqueue_silence(self, seconds, marker=None):
         self.wait_open()
-        return self._append(np.zeros(int(self._rate * seconds), dtype=np.float32), marker)
+        return self._append(np.zeros(int(self._rate * seconds), dtype=np.float32), marker) is not None
 
     def enqueue_end(self, marker):
         with self._lock:
@@ -393,6 +470,8 @@ class AudioPlayer:
                 segs = self._segments
                 while filled < frames and segs:
                     seg = segs[0]
+                    if seg.held:
+                        break
                     if not seg.announced:
                         seg.announced = True
                         if seg.marker is not None:
@@ -408,18 +487,21 @@ class AudioPlayer:
                             seg.stretcher = None
                             continue
                         finished = seg.stretcher.done
+                        if seg.stretcher.ran_out:
+                            seg.held = True  # silence until there is enough again
+                            self.starved += 1
                     else:
                         take = min(frames - filled, seg.samples.size - seg.offset)
                         if take > 0:
                             out[filled:filled + take] = seg.samples[seg.offset:seg.offset + take]
                             filled += take
                             seg.offset += take
-                        finished = seg.offset >= seg.samples.size
+                        finished = seg.offset >= seg.samples.size and not seg.growing
                     if finished:
                         segs.popleft()
                     else:
                         break
-                if filled or not segs:
+                if filled or not segs or segs[0].held:  # waiting for speech is not a stuck device
                     self._last_progress = time.monotonic()
             if filled < frames:
                 out[filled:] = 0

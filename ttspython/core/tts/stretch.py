@@ -74,10 +74,17 @@ class Stretcher:
     frame is taken near pos, shifted to line up with the audio that naturally follows
     the previous frame. At speed 1.0 that natural frame is used as is, which gives the
     original samples back exactly, so moving in and out of the dead zone is seamless.
+
+    growing=True is for audio still being made: grow() adds to it and end() says that was
+    all. If playback catches up with it, read() fades out and sets starved until grow()
+    has given it more; it then fades back in from where it was.
     """
 
-    def __init__(self, x, rate):
+    def __init__(self, x, rate, growing=False):
         self.x = np.asarray(x, dtype=np.float32)
+        self.growing = growing
+        self.starved = False
+        self._fade_in = False
         self.n = max(16, int(rate * FRAME_SECONDS) // 2 * 2)
         self.hs = self.n // 2
         self.tol = max(1, int(rate * SEARCH_SECONDS))
@@ -89,11 +96,28 @@ class Stretcher:
         self.factor = 1.0  # the speed of the last hop
         self._pending = np.zeros(0, dtype=np.float32)
         self._offset = 0
-        self._ended = self.x.size == 0
+        self._ended = self.x.size == 0 and not growing
+
+    def grow(self, x):
+        """Replace the buffer with a longer copy of itself. The copy is made away from the
+        audio thread, so this is only a swap."""
+        self.x = x
+        self.starved = False
+
+    def end(self):
+        self.growing = False
+        self.starved = False
+        if self.x.size == 0:
+            self._ended = True
 
     @property
     def done(self):
         return self._ended and self._offset >= self._pending.size
+
+    @property
+    def ran_out(self):
+        """Starved, and the fade-out has been played too."""
+        return self.starved and self._offset >= self._pending.size
 
     def fraction(self):
         """How far into the input playback is, 0..1."""
@@ -117,15 +141,31 @@ class Stretcher:
             out[a - start:b - start] = self.x[a:b]
         return out
 
+    def _enough_for_a_hop(self):
+        reach = int(round(self.pos)) + self.tol + self.n
+        if self.prev is not None:
+            reach = max(reach, self.prev + self.hs + self.n)
+        return reach <= self.x.size
+
     def _hop(self, factor):
         hs, n, win = self.hs, self.n, self.win
+        if self.growing and not self._enough_for_a_hop():
+            self.starved = True
+            if self.prev is None:
+                return None
+            tail = self.tail  # the last frame fades out, and the next one fades in from the same place
+            self.prev = self.tail = None
+            self._fade_in = True
+            return tail
         if self.prev is not None and self.pos >= self.x.size:
             self._ended = True
             return self.tail  # fade out the last frame
         if self.prev is None:
             start = int(round(self.pos))
             frame = self._frame(start)
-            out = frame[:hs].copy()  # the very first half frame plays as is
+            # The very first half frame plays as is.
+            out = frame[:hs] * win[:hs] if self._fade_in else frame[:hs].copy()
+            self._fade_in = False
         else:
             natural = self.prev + hs
             if factor == 1.0:
@@ -148,13 +188,16 @@ class Stretcher:
 
     def read(self, out, factor):
         """Fill out with the next samples at this speed. Returns how many were written
-        (fewer than out.size only at the end of the buffer)."""
+        (fewer than out.size only at the end of the buffer, or when starved)."""
         filled, want = 0, out.size
         while filled < want:
             if self._offset >= self._pending.size:
-                if self._ended:
+                if self._ended or self.starved:
                     break
-                self._pending = self._hop(factor)
+                hop = self._hop(factor)
+                if hop is None:
+                    break
+                self._pending = hop
                 self._offset = 0
                 continue
             take = min(want - filled, self._pending.size - self._offset)

@@ -28,6 +28,16 @@ class Cancelled(Exception):
 
 
 @dataclass(frozen=True)
+class AudioBlock:
+    """Part of a chunk, from a renderer that can hand over audio while it is still making more."""
+    pcm: np.ndarray
+    rate: int
+    left: float = 0.0        # seconds of audio likely still to come in this chunk
+    speed: float = 0.0       # seconds of audio made per second, lately (0: not known)
+    next_block: float = 0.0  # seconds of audio that will arrive together next
+
+
+@dataclass(frozen=True)
 class Voice:
     id: str
     name: str
@@ -314,6 +324,13 @@ class MultiRenderer:
 
     def render(self, text, voice_id, wpm, cancel):
         return self._engine(voice_id).render(text, voice_id, wpm, cancel)
+
+    def streams(self, voice_id):
+        """Can this voice be heard while it is being made?"""
+        return hasattr(self._engine(voice_id), "stream")
+
+    def stream(self, text, voice_id, wpm, cancel):
+        return self._engine(voice_id).stream(text, voice_id, wpm, cancel)
 
 
 def create_system_renderer():

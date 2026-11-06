@@ -514,7 +514,7 @@ class AppController(QObject):
             self.mini.wave.set_source(wave_src)
         now = self.window.transport.now
         if state is State.STARTING and self._your_voice_is_loading():
-            self._toast("Loading your voice. The first sentence takes about 10 seconds.", 5000)
+            self._toast("Loading your voice. This takes a few seconds.", 5000)
         if state is State.IDLE:
             self._end_voice_try()
             self.editor.stop_tracking()

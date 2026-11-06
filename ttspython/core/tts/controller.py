@@ -36,6 +36,23 @@ LOOKAHEAD_MAX = 5        # ...but never more than this many chunks
 RERENDER_DELAY = 0.35    # after a speed change, re-render upcoming chunks once the slider settles
 QUEUE_GAP_SECONDS = 0.5  # same pause between queue items as v4
 STALL_SECONDS = 5.0
+START_CUSHION = 0.2      # seconds in hand beyond the wait for the next block of audio
+FINISH_SAFETY = 1.25     # allow for making the rest of a chunk taking this much longer than it looks
+
+
+def enough_to_play(buffered, left, speed, factor, next_block):
+    """May a chunk being made start now, without running out in the middle?
+
+    buffered: seconds of listening already here. left: seconds of audio still to make. speed: seconds
+    of audio made per second. factor: how much faster than made it plays. next_block: seconds of audio
+    that arrive together next. A computer slower than playback gets a longer wait up front instead of
+    pauses in the middle of words.
+    """
+    if not speed:
+        return False
+    if buffered < next_block / speed + START_CUSHION:
+        return False
+    return left / speed * FINISH_SAFETY <= buffered + left / (factor or 1.0)
 
 
 class AudioStalled(RuntimeError):
@@ -451,14 +468,23 @@ class SpeechController:
                             idx = min(idx, dropped)
                 chunk = chunks[idx]
                 wpm = self.rate
+                marker = Marker(utt_id=utt, index=idx, total=len(chunks), pos16=chunk.pos16, end16=chunk.end16,
+                                generation=generation, item_id=item_id, shown=shown)
+                if hasattr(renderer, "streams") and renderer.streams(self.voice_id):
+                    played = self._play_while_making(renderer, chunk.text, wpm, marker)
+                    if played is None:
+                        restart = True
+                        break
+                    if not played:
+                        return False
+                    idx += 1
+                    continue
                 try:
                     pcm, rate = renderer.render(chunk.text, self.voice_id, wpm, self._cancel)
                 except Cancelled:
                     return False
                 if idx == 0:
                     pcm = trim_leading_silence(pcm, rate)
-                marker = Marker(utt_id=utt, index=idx, total=len(chunks), pos16=chunk.pos16, end16=chunk.end16,
-                                generation=generation, item_id=item_id, shown=shown)
                 native = renderer.native_wpm(wpm, self.voice_id) if hasattr(renderer, "native_wpm") else wpm
                 if self._cancel.is_set() or not self.player.enqueue(pcm, rate, marker, native_wpm=native):
                     return False
@@ -493,6 +519,41 @@ class SpeechController:
             utt = next(self._utt_ids)
             begin(utt)
             idx = 0
+
+    def _play_while_making(self, renderer, text, wpm, marker):
+        """Queue one chunk and add to it as the engine makes it. Returns True when all of it is
+        queued, False if stopped, None if the voice changed meanwhile."""
+        voice = self.voice_id
+        feed = None
+        blocks = renderer.stream(text, voice, wpm, self._cancel)
+        try:
+            for block in blocks:
+                if self._cancel.is_set():
+                    return False
+                if self._restart_pending:
+                    return None
+                self._check_stalled()
+                pcm = block.pcm
+                if feed is None:
+                    native = renderer.native_wpm(wpm, voice)
+                    made = pcm.size / block.rate
+                    if marker.index == 0:
+                        pcm = trim_leading_silence(pcm, block.rate)
+                    feed = self.player.open_feed(block.rate, marker, native, made + block.left)
+                    if feed is None:
+                        return False
+                feed.add(pcm)
+                if feed.waiting and enough_to_play(feed.buffered_seconds, block.left, block.speed, feed.factor,
+                                                   block.next_block):
+                    feed.release()
+        except Cancelled:
+            return False
+        finally:
+            blocks.close()  # gives the model back, on this thread
+        if feed is None:
+            return not self._cancel.is_set()
+        feed.finish(renderer.native_wpm(wpm, voice))
+        return not self._cancel.is_set()
 
     def _check_stalled(self):
         if self.player.stalled(STALL_SECONDS):

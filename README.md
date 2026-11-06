@@ -83,7 +83,7 @@ Work even when TTSPython is in the background. All can be changed in **Settings 
 - **Windows 10/11** or **Linux** (X11 or Wayland). Linux is a preview in 5.0: it is built and smoke-tested automatically, but has had less hands-on testing than Windows, so please report what you find.
 - To run from source: Python 3.10 or newer (developed on 3.13; the full test suite also passes on 3.10).
 - Python packages (installed by the scripts below): `PySide6-Essentials`, `pyttsx3`, `numpy`, `sounddevice`, `lameenc`, `faster-whisper`, `sherpa-onnx` (the instant live preview), `sentencepiece` (your own voice); on Windows also `comtypes` (talks to the SAPI5 voices; pyttsx3 brings `pywin32` for its fallback driver); on Linux also `pynput`.
-- For your own voice (optional): a microphone, 762 MB of disk space and about 1.2 GB of free memory.
+- For your own voice (optional): a microphone, 762 MB of disk space and about 1.3 GB of free memory.
 - Linux system packages: `espeak-ng`, `portaudio`, `xcb-util-cursor` (Debian/Ubuntu: `libxcb-cursor0`). Optional: `wtype` to type dictation at the cursor on Wayland.
 
 ## Installation
@@ -189,8 +189,8 @@ It is for your own voice only. The statement says that you agree to the copy and
 The check uses your Whisper model, so if you have never dictated, that also downloads once when you stop recording (Small is about 480 MB). **Cancel** stops the whole thing and nothing is kept, as does closing the window.
 
 - **Privacy:** the recording, the voice and all the speech stay on your computer, in `%LOCALAPPDATA%\TTSPython\cloned-voices` (Windows) or `~/.local/share/ttspython/cloned-voices` (Linux). **Remove** deletes a voice and its recording. **Delete the voice model** frees the disk space and keeps your voices. If the model is gone, your voice stays selected and speaking with it says where to download it again.
-- **What it needs:** on the test PC (Intel i5-12600K) it makes speech 2.2 to 2.4 times as fast as it plays, using about 3 processor cores and 1.2 GB of memory, which is released 2 minutes after speech ends. On a slower or busy computer it may pause between sentences; the app measures this when it makes the voice; exporting to a file is not affected, it only takes longer.
-- **Waiting:** speech starts about 3 seconds after you press Play, or about 10 seconds after a pause while the model loads, because each sentence is made in full before it plays.
+- **What it needs:** on the test PC (Intel i5-12600K) it makes speech 2.2 to 2.4 times as fast as it plays, using about 3 processor cores and 1.3 GB of memory, which is released 2 minutes after speech ends. On a slower or busy computer it may pause between sentences; the app measures this when it makes the voice; exporting to a file is not affected, it only takes longer.
+- **Waiting:** on the test PC speech starts about half a second after you press Play, because you hear each sentence while it is being made, or about 3 seconds if the model has to load first (it is let go 2 minutes after speech ends). On a computer too slow to keep up, it waits longer before starting a sentence so that it does not stop in the middle of a word.
 - **Limits:** only tested in English, and not yet with a real microphone in a real room. Very short phrases sometimes gain a stray word (6 of 42 tries with one to three words, such as "Yes. All of them."), and digit strings such as phone numbers can come out wrong (555-0142 was heard as 535-042), so check anything important. Longer sentences had about 1.5% of words heard wrong.
 
 ## Keyboard shortcuts (in the window)

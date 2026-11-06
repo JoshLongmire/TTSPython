@@ -433,7 +433,7 @@ class CloneDialog(QDialog):
     def _hear(self):
         voice_id = self.selected_voice()
         if voice_id:
-            self._set_status("Playing a sample. The first sentence can take about 10 seconds.")
+            self._set_status("Playing a sample. It can take a few seconds to start.")
             self.hear_voice.emit(voice_id)
 
     def _ask(self, title, question):

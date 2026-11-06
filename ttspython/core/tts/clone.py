@@ -21,6 +21,7 @@ import threading
 import time
 import uuid
 import wave
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 
 import numpy as np
@@ -29,7 +30,7 @@ from ..download import fetch
 from ..platform import data_dir
 from ..resample import resample
 from ..settings import atomic_replace
-from .render import Cancelled, Voice
+from .render import AudioBlock, Cancelled, Voice
 
 PREFIX = "clone:"
 _BASE = "https://huggingface.co/OpenMOSS-Team/{repo}/resolve/{revision}/{name}"
@@ -53,7 +54,7 @@ MODEL_FILES = (
 )
 MODEL_BYTES = sum(f[2] for f in MODEL_FILES)
 MODEL_MB = round(MODEL_BYTES / 1e6)
-MEMORY_GB = 1.2  # private memory while a cloned voice is in use (measured); released when idle
+MEMORY_GB = 1.3  # memory in use while a cloned voice speaks (measured, 1.23 to 1.36); released when idle
 
 # The conversation the model was trained on (token ids), from the same revision of the model.
 _USER_PREFIX = (600, 289, 10356, 13, 10356, 10425, 1860, 4546, 12907, 10363, 13325, 11492)
@@ -65,7 +66,9 @@ _ASSISTANT_PREFIX = (10356, 14, 5, 4, 8165, 430)
 
 MAX_TOKENS = 75  # the model's longest reliable sentence; longer text is spoken in pieces
 MAX_FRAMES = 375  # 30 s, the model's limit for one piece
-_DECODE_EVERY = 16
+_DECODE_EVERY = 8  # frames in each block of sound, 0.64 s. How they are grouped does not change the sound (at most 1e-6)
+_FRAME_SECONDS = 0.08
+_SECONDS_PER_TOKEN = 0.22  # sound comes at 2.3 to 3 frames per token: to guess how long a sentence will be
 _PIECE_GAP_SECONDS = 0.12
 IDLE_SECONDS = 120  # the model holds over a gigabyte: let it go soon after speech ends
 FALLBACK_WPM = 180  # until a voice has spoken something long enough to measure
@@ -372,6 +375,8 @@ def engine_threads():
 class Engine:
     """The loaded model. Not safe for two callers at once: use it through the lock in CloneRenderer."""
 
+    speed = 0.0  # seconds of audio it makes per second, lately
+
     def __init__(self, folder=None, threads=None):
         import onnxruntime as ort
         import sentencepiece as spm
@@ -395,16 +400,17 @@ class Engine:
             # Waiting without spinning: 3 CPU cores instead of 10, at the same speed.
             options.add_session_config_entry("session.intra_op.allow_spinning", "0")
             options.add_session_config_entry("session.inter_op.allow_spinning", "0")
-            # Weights stay in the shared file mapping: 1.2 GB private memory instead of 2.1, 7% slower.
+            # Weights stay in the shared file mapping: 0.9 GB less private memory, 7% slower.
             options.add_session_config_entry("session.disable_prepacking", "1")
             return ort.InferenceSession(os.path.join(folder, name), sess_options=options, providers=["CPUExecutionProvider"])
 
         files, codec = self._tts["files"], self._codec["files"]
-        self._prefill = session(files["prefill"])
-        self._decode = session(files["decode_step"])
-        self._frame = session(files["local_fixed_sampled_frame"])
-        self._audio_encoder = session(codec["encode"])
-        self._audio_decoder = session(codec["decode_step"])
+        # Side by side: 2.4 s instead of 5.5. Speaking never uses the encoder, which is left until a voice is made.
+        with ThreadPoolExecutor(max_workers=4, thread_name_prefix="clone-load") as pool:
+            self._prefill, self._decode, self._frame, self._audio_decoder = pool.map(session, (
+                files["prefill"], files["decode_step"], files["local_fixed_sampled_frame"], codec["decode_step"]))
+        self._open_encoder = lambda: session(codec["encode"])
+        self._audio_encoder = None
         self._tokenizer = spm.SentencePieceProcessor(model_file=os.path.join(folder, "tokenizer.model"))
         self._random = np.random.default_rng()
 
@@ -417,6 +423,8 @@ class Engine:
 
     def encode(self, audio, rate):
         """float32 mono audio -> the voice's audio codes, shape (frames, n_vq)."""
+        if self._audio_encoder is None:
+            self._audio_encoder = self._open_encoder()
         audio = resample(np.asarray(audio, dtype=np.float32), int(rate), self.rate)
         stereo = np.stack([audio, audio])[None]
         out = self._named(self._audio_encoder, self._audio_encoder.run(
@@ -466,6 +474,11 @@ class Engine:
         return out["audio"][0, :, :int(np.asarray(out["audio_lengths"]).reshape(-1)[0])]
 
     def _speak_piece(self, codes, token_ids, cancel):
+        blocks = list(self._piece_blocks(codes, token_ids, cancel))
+        return np.concatenate(blocks) if blocks else np.zeros(0, dtype=np.float32)
+
+    def _piece_blocks(self, codes, token_ids, cancel):
+        """Yields float32 mono audio as soon as there is some. self.speed follows how fast it comes."""
         ids = self._request(codes, token_ids)
         names = self._tts["onnx"]
         out = self._named(self._prefill, self._prefill.run(
@@ -475,7 +488,8 @@ class Engine:
         past = {n.replace("present_", "past_"): out[n] for n in names["prefill_output_names"][1:]}
         seen = np.zeros((1, self._n_vq, self._config["audio_codebook_sizes"][0]), dtype=np.int32)
         state = self._new_decoder_state()
-        chunks, pending = [], []
+        pending = []
+        started = time.perf_counter()
         # Sound comes at 2.3 to 3 frames per token. The limit stops a runaway, which short text can
         # be: "Yes." once went on for 4 s of babble.
         for _ in range(frame_limit(len(token_ids))):
@@ -499,23 +513,36 @@ class Engine:
             past_length += 1
             past = {n.replace("present_", "past_"): step[n] for n in names["decode_output_names"][1:]}
             if len(pending) >= _DECODE_EVERY:
-                chunks.append(self._to_audio(pending, state))
+                block = self._to_audio(pending, state).mean(axis=0).astype(np.float32)
+                self._note_speed(block.size / self.rate, time.perf_counter() - started)
+                yield block
+                started = time.perf_counter()
                 pending = []
         if pending:
-            chunks.append(self._to_audio(pending, state))
-        if not chunks:
-            return np.zeros(0, dtype=np.float32)
-        return np.concatenate(chunks, axis=1).mean(axis=0).astype(np.float32)
+            yield self._to_audio(pending, state).mean(axis=0).astype(np.float32)
+
+    def _note_speed(self, seconds, elapsed):
+        if elapsed > 0:
+            now = seconds / elapsed
+            self.speed = 0.5 * (self.speed + now) if self.speed else now
+
+    def speak_blocks(self, codes, text, cancel):
+        """Yields (float32 mono audio at self.rate, seconds likely still to come) as they are made."""
+        pieces = [self.tokens(piece) for piece in split_tokens(text, self.tokens)]
+        expected = sum(len(ids) for ids in pieces) * _SECONDS_PER_TOKEN + (len(pieces) - 1) * _PIECE_GAP_SECONDS
+        made = 0.0
+        for i, ids in enumerate(pieces):
+            if i:
+                gap = np.zeros(int(_PIECE_GAP_SECONDS * self.rate), dtype=np.float32)
+                made += gap.size / self.rate
+                yield gap, max(0.0, expected - made)
+            for block in self._piece_blocks(codes, ids, cancel):
+                made += block.size / self.rate
+                yield block, max(0.0, expected - made)
 
     def speak(self, codes, text, cancel):
         """float32 mono samples at self.rate."""
-        pieces = split_tokens(text, self.tokens)
-        gap = np.zeros(int(_PIECE_GAP_SECONDS * self.rate), dtype=np.float32)
-        out = []
-        for i, piece in enumerate(pieces):
-            if i:
-                out.append(gap)
-            out.append(self._speak_piece(codes, self.tokens(piece), cancel))
+        out = [block for block, _left in self.speak_blocks(codes, text, cancel)]
         return np.concatenate(out) if out else np.zeros(0, dtype=np.float32)
 
 
@@ -655,19 +682,29 @@ class CloneRenderer:
     def native_wpm(self, wpm, voice_id=None):
         return self._native.get(voice_id, FALLBACK_WPM)
 
-    def render(self, text, voice_id, wpm, cancel):
+    def _check_ready(self, voice_id, cancel):
+        """Everything that can be told before the model is touched. Returns the voice's codes."""
         if cancel.is_set():
             raise Cancelled()
         if not model_installed():
             raise RuntimeError("Your voice needs its model, which is not downloaded. Open Settings > Speech > Get more voices.")
-        if not any(ch.isalnum() for ch in text):
-            return np.zeros(self.sample_rate // 10, dtype=np.int16), self.sample_rate
         try:
             codes = self._codes.get(voice_id)
             if codes is None:
                 codes = self._codes[voice_id] = load_codes(voice_id)
         except (OSError, ValueError) as exc:
             raise RuntimeError("This voice is gone. Pick another voice.") from exc
+        return codes
+
+    def _note_pace(self, voice_id, text, seconds):
+        words = len(text.split())
+        if words >= _MEASURE_MIN_WORDS and seconds > 0:
+            self._native[voice_id] = max(_NATIVE_RANGE[0], min(_NATIVE_RANGE[1], words * 60 / seconds))
+
+    def render(self, text, voice_id, wpm, cancel):
+        codes = self._check_ready(voice_id, cancel)
+        if not any(ch.isalnum() for ch in text):
+            return np.zeros(self.sample_rate // 10, dtype=np.int16), self.sample_rate
         if self._engine_factory is None:
             _load_engine(cancel)
         _take_turn(cancel)
@@ -678,9 +715,33 @@ class CloneRenderer:
         finally:
             _release_when_idle()
             _engine_lock.release()
-        words = len(text.split())
-        seconds = audio.size / engine.rate
-        if words >= _MEASURE_MIN_WORDS and seconds > 0:
-            self._native[voice_id] = max(_NATIVE_RANGE[0], min(_NATIVE_RANGE[1], words * 60 / seconds))
-        pcm = (np.clip(audio, -1, 1) * 32767).astype(np.int16)
-        return pcm, engine.rate
+        self._note_pace(voice_id, text, audio.size / engine.rate)
+        return _to_pcm(audio), engine.rate
+
+    def stream(self, text, voice_id, wpm, cancel):
+        """Yields AudioBlocks as they are made: always at least one. Holds the model until it ends
+        or is closed, on the thread that started it."""
+        codes = self._check_ready(voice_id, cancel)
+        if not any(ch.isalnum() for ch in text):
+            yield AudioBlock(np.zeros(self.sample_rate // 10, dtype=np.int16), self.sample_rate)
+            return
+        if self._engine_factory is None:
+            _load_engine(cancel)
+        _take_turn(cancel)
+        made = 0
+        try:
+            _cancel_idle_timer()  # it must not let the model go in the middle of a long sentence
+            engine = self._engine_factory() if self._engine_factory else shared_engine()
+            for audio, left in engine.speak_blocks(codes, text, cancel):
+                made += audio.size
+                yield AudioBlock(_to_pcm(audio), engine.rate, left, engine.speed, _DECODE_EVERY * _FRAME_SECONDS)
+            if not made:
+                yield AudioBlock(np.zeros(0, dtype=np.int16), engine.rate)
+        finally:
+            _release_when_idle()
+            _engine_lock.release()
+        self._note_pace(voice_id, text, made / engine.rate)
+
+
+def _to_pcm(audio):
+    return (np.clip(audio, -1, 1) * 32767).astype(np.int16)
