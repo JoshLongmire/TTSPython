@@ -140,7 +140,7 @@ def test_play_reads_the_highlight_else_the_clipboard(qtbot, tmp_path, clip):
         qtbot.waitUntil(lambda: c.speech.busy, timeout=2000)
         assert "Speaking highlighted text..." in said
         c.speak_clipboard()  # pressed again: stop
-        assert not c.speech.busy
+        qtbot.waitUntil(lambda: not c.speech.busy, timeout=2000)  # Stop returns at once; the engine follows
         c.selection.text = None
         c.speak_clipboard()
         qtbot.waitUntil(lambda: c.speech.busy, timeout=2000)
