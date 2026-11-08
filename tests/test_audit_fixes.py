@@ -91,7 +91,8 @@ def test_now_playing_marker_clears_and_paused_label_recovers(qtbot, tmp_path):
     c = make_controller(qtbot, tmp_path)
     try:
         for i in range(2):
-            c.queue.add(f"Queue item {i} has a few words in it.", f"Item {i}")
+            # Long enough to still be playing when looked at: the stand-in device plays 40 times as fast as real time.
+            c.queue.add(" ".join(f"Queue item {i} sentence {n} has a few words in it." for n in range(30)), f"Item {i}")
         c.queue_play()
         qtbot.waitUntil(lambda: c.speech.state is State.PLAYING, timeout=3000)
         c.speech.pause()
