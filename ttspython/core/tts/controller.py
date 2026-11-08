@@ -94,10 +94,16 @@ class _Job:
 _SHUTDOWN = object()
 
 
+START_GATE_SECONDS = 2.0  # the engine starts by then even if no window was ever painted
+
+
 class SpeechController:
     def __init__(self, queue_model: SpeechQueue | None = None, renderer_factory=create_renderer,
-                 player: AudioPlayer | None = None, voice_id="", rate=200, volume=1.0):
+                 player: AudioPlayer | None = None, voice_id="", rate=200, volume=1.0, start_gate=None):
+        """start_gate: an Event the engine waits for (at most START_GATE_SECONDS) before it starts, so that its
+        start-up work does not hold up the first window."""
         self.events = EventEmitter()
+        self._start_gate = start_gate
         self.queue = queue_model if queue_model is not None else SpeechQueue()
         self._renderer_factory = renderer_factory
         self._player_events = queue.Queue()
@@ -305,6 +311,8 @@ class SpeechController:
         self.events.emit("state_changed", state)
 
     def _synth_main(self):
+        if self._start_gate is not None:
+            self._start_gate.wait(START_GATE_SECONDS)
         with com_apartment():
             try:
                 renderer = self._renderer_factory()

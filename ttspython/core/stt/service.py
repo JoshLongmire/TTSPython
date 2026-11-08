@@ -510,6 +510,9 @@ class SttService:
         self._model_tried = threading.Event()
         self._model_tried.set()
         self._detected = None  # the language Whisper heard last, with Auto-detect
+        self._typed = None  # the recording whose text has been typed: by the quick finish or the final pass, never both
+        self._quick_snapped = threading.Event()  # the quick finish has its copy of the audio
+        self._quick_snapped.set()
         self.unload_when_idle = unload_when_idle
         self.auto_unload = auto_unload
         self.auto_unload_minutes = auto_unload_minutes
@@ -679,8 +682,46 @@ class SttService:
             target = self._target
             self._session += 1
             self._set_state(SttState.TRANSCRIBING)
+            quick = self._last_pass is not None and hasattr(self.recorder, "snapshot")
+            if quick:
+                self._quick_snapped.clear()
+        if quick:
+            threading.Thread(target=self._quick_finish, args=(target, self._recording), name="stt-quick-finish",
+                             daemon=True).start()
         self._pool.submit(self._transcribe, audio, target)
         return True
+
+    def _quick_finish(self, target, recording):
+        """Type the text at once if the last finished live pass already covers everything said, with only
+        silence after it. Otherwise the final pass (queued behind the live pass in flight) does it, as before:
+        that wait was up to a whole pass (about 1.5 s with Small) even when nothing was left to transcribe."""
+        try:
+            try:
+                with self._caption_lock:
+                    last, settled_text, settled = self._last_pass, self._settled_text, self._settled_samples
+                if last is None or last[0] != settled or self._cancelled:
+                    return
+                rate = self.recorder.sample_rate
+                rest = self.recorder.snapshot(last[1])
+                # How loud this person speaks: the last half minute is enough, and a long recording is not converted.
+                said = self.recorder.snapshot(max(settled, last[1] - rate * 30)) if rest.size > rate * REUSE_SECONDS else None
+            finally:
+                self._quick_snapped.set()  # the final pass may take the audio now; it does not wait for the rest
+            if said is not None and (_has_speech(rest, rate) or _loud_part(rest, said, rate)):
+                return
+            text = self._final(_joined([settled_text, last[2]]))
+            if text.strip() and self._claim_typing(recording):
+                self.events.emit("transcript_ready", text, target)
+        except Exception:
+            log.exception("The quick finish failed; the final pass types the text")
+
+    def _claim_typing(self, recording):
+        """True for the first of the quick finish and the final pass to ask: only that one types."""
+        with self._lock:
+            if self._typed == recording or self._recording != recording or self._cancelled:
+                return False
+            self._typed = recording
+            return True
 
     def _microphone_lost(self):
         """Unplugged, or its driver stopped: what was said so far is still typed."""
@@ -1059,6 +1100,11 @@ class SttService:
     def _transcribe(self, audio, target):
         file = None
         try:
+            self._quick_snapped.wait(10)  # it reads the recorder: its copy is taken before the audio is
+            if self._typed == self._recording and not isinstance(audio, str):
+                if callable(audio):
+                    self.recorder.drop_audio()
+                return  # typed already by the quick finish; finally below still tidies up
             if self._cancelled:
                 if callable(audio):
                     self.recorder.drop_audio()
@@ -1093,7 +1139,8 @@ class SttService:
             if self._cancelled:
                 return
             if text.strip():
-                self.events.emit("transcript_ready", text, target)
+                if file or self._claim_typing(self._recording):  # else the quick finish typed it
+                    self.events.emit("transcript_ready", text, target)
             elif heard.strip():
                 self.events.emit("model_status", "Nothing left to type")
             else:
@@ -1101,7 +1148,7 @@ class SttService:
         except DownloadCancelled:
             pass  # the user knows: cancel() said so
         except Exception as exc:
-            if not self._cancelled:
+            if not self._cancelled and (file or self._typed != self._recording):
                 self._keep_for_retry(audio, target, f"Failed to transcribe: {exc}.", file)
         finally:
             if file:

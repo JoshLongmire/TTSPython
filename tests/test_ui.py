@@ -397,7 +397,7 @@ def test_hotkey_actions_dispatch(ctl, qtbot):
     ctl.fake_hotkeys.triggered.emit("speak_clipboard")
     qtbot.waitUntil(lambda: ctl.speech.busy, timeout=2000)
     ctl.fake_hotkeys.triggered.emit("stop_speech")
-    assert not ctl.speech.busy
+    qtbot.waitUntil(lambda: not ctl.speech.busy, timeout=2000)  # Stop returns at once; the engine follows
     ctl.fake_hotkeys.triggered.emit("toggle_mini")
     assert ctl.mini.isVisible() and not ctl.window.isVisible()
     ctl.fake_hotkeys.triggered.emit("toggle_mini")

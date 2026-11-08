@@ -31,7 +31,7 @@ A free, open-source, offline text-to-speech (TTS) and speech-to-text (STT) deskt
 ### Listen (speech-to-text)
 - Offline dictation with `faster-whisper` (CPU, int8). Press the record button, speak, press again.
 - **Live captions:** when you dictate into another app, a bubble above the mini bar shows each word about half a second after you say it, so you can spot a mistake early. A fast **instant preview** recognizer shows the words first (slightly dimmer); Whisper then checks them and corrects them in place, and the newest word is highlighted. The bubble grows a line at a time (up to three), with the newest words right above the bar. Its **X** (or `Esc`) cancels the dictation and nothing is typed.
-- **Typed right after you stop:** Whisper checks the text whenever you pause, so if you pause before stopping, the text is typed almost at once (usually under 0.1 s in tests, 0.6 s at most); otherwise in about 0.5 to 1.2 s. Long dictations settle at real pauses as you go, so this stays short however long you talk.
+- **Typed right after you stop:** Whisper checks the text whenever you pause, so if you pause before stopping, the text is typed at once: in tests, 5 to 11 ms after a pause of 1.5 seconds or more, and about 0.1 s after half a second; if you talk right up to the stop, in about 1.3 s with the Small model. Long dictations settle at real pauses as you go, so this stays short however long you talk.
 - **Spoken commands:** say "period" (or "full stop"), "comma", "question mark", "exclamation mark" (or "exclamation point"), "colon", "semicolon", "new line", "new paragraph", and "delete that" (or "scratch that") to remove the sentence before it. After "the", "a", "this" and similar words, with more words following, they stay words ("the period of time"). English, and Auto-detect when it hears English; turn them off in **Settings > Listen > Spoken commands**.
 - Dictation keeps full speed while TTSPython is in the background (Windows 11 would otherwise slow it down 2.6 times while you work in another app).
 - Pick the **Whisper model** (from Tiny to Large v3 Turbo) and the **language**: English by default, Auto-detect, or Spanish, French, German, Italian, Portuguese, Dutch, Polish, Russian, Ukrainian, Turkish, Arabic, Hindi, Japanese, Korean or Chinese.
@@ -352,7 +352,7 @@ which TTSPython downloads when you ask for it and runs with ONNX Runtime; it is 
 
 ## Changelog
 
-See [`CHANGELOG.md`](CHANGELOG.md) for the full version history.
+See [`CHANGELOG.md`](CHANGELOG.md) for the full version history. How 5.1 measures against 5.0 (start-up, memory, dictation, size): [`docs/perf/5.1-vs-5.0.md`](docs/perf/5.1-vs-5.0.md).
 
 ## Additional guides
 

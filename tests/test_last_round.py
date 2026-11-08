@@ -570,3 +570,136 @@ def test_a_dictation_ending_in_a_new_line_leaves_no_blank_line(qtbot):
     editor.setTextCursor(cursor)
     editor.add_dictation("Buy milk.\n")
     assert editor.toPlainText() == "Notes\nBuy milk.\n"
+
+
+# --- the quick finish: text typed at Stop without waiting for the pass in flight -------------------------
+class SlowModel:
+    """Each pass takes delay seconds and hears "word" for each second of audio."""
+
+    def __init__(self, delay):
+        self.delay = delay
+        self.passes = 0
+
+    def transcribe(self, audio, **kwargs):
+        import time as _time
+
+        self.passes += 1
+        _time.sleep(self.delay)
+        return [Segment(" ".join(["word"] * max(1, int(audio.size / 16000))), end=audio.size / 16000)], None
+
+
+class FixedRecorder:
+    """Speech (a loud tone) for speech_s seconds, then quiet, all there from the start; or growing."""
+    sample_rate = capture_rate = 16000
+    level = 0.3
+    on_limit = on_block = on_lost = None
+    spool = spool_folder = None
+
+    def __init__(self, speech_s, quiet_s, more_speech_after=None):
+        import numpy as _np
+
+        t = _np.arange(int(16000 * speech_s)) / 16000
+        self.audio = _np.concatenate([(0.3 * _np.sin(2 * _np.pi * 220 * t)).astype(_np.float32),
+                                      _np.zeros(int(16000 * quiet_s), _np.float32)])
+        self.more = more_speech_after
+
+    def start(self, device=None):
+        import time as _time
+
+        self.t0 = _time.monotonic()
+
+    def _now(self):
+        import time as _time
+
+        import numpy as _np
+
+        if self.more is not None and _time.monotonic() - self.t0 > self.more:
+            t = _np.arange(16000) / 16000
+            return _np.concatenate([self.audio, (0.3 * _np.sin(2 * _np.pi * 300 * t)).astype(_np.float32)])
+        return self.audio
+
+    def snapshot(self, start=0):
+        return self._now()[start:]
+
+    def stop(self):
+        return self._now()
+
+
+def quick_service(recorder, delay):
+    import time as _time
+
+    model = SlowModel(delay)
+    svc = SttService(recorder=recorder, cache=ModelCache(lambda _n: model), timer_factory=FakeTimer)
+    svc.preview_enabled = False
+    got = []
+    svc.events.on("transcript_ready", lambda text, _t: got.append((_time.monotonic(), text)))
+    return svc, model, got
+
+
+def test_after_a_pause_the_text_is_typed_without_waiting_for_the_pass_in_flight():
+    import time as _time
+
+    svc, model, got = quick_service(FixedRecorder(2.0, 1.0), delay=1.0)
+    svc.start("editor")
+    assert wait_for(lambda: svc._last_pass is not None, timeout=5)  # one pass done, the next one under way
+    assert wait_for(lambda: model.passes >= 2, timeout=5)
+    stopped = _time.monotonic()
+    svc.stop()
+    assert wait_for(lambda: got, timeout=5)
+    assert got[0][0] - stopped < 0.5  # a pass takes 1 s: before, this waited for it
+    assert wait_for(lambda: svc.state is SttState.IDLE, timeout=5)
+    _time.sleep(0.2)
+    svc.shutdown()
+    assert [text for _t, text in got] == ["Word word word."]  # typed once
+
+
+def test_words_said_after_the_last_pass_are_never_skipped():
+    import time as _time
+
+    svc, model, got = quick_service(FixedRecorder(1.0, 0.0, more_speech_after=0.3), delay=0.8)
+    svc.start("editor")
+    assert wait_for(lambda: svc._last_pass is not None, timeout=5)
+    _time.sleep(0.4)  # more speech arrives after that pass
+    svc.stop()
+    assert wait_for(lambda: svc.state is SttState.IDLE, timeout=10)
+    svc.shutdown()
+    assert len(got) == 1 and got[0][1] == "Word word."  # from the final pass, which heard the new second
+
+
+def test_cancel_right_after_stop_types_nothing_twice():
+    import time as _time
+
+    svc, model, got = quick_service(FixedRecorder(2.0, 1.0), delay=0.6)
+    svc.start("editor")
+    assert wait_for(lambda: svc._last_pass is not None, timeout=5)
+    svc.stop()
+    svc.cancel()
+    assert wait_for(lambda: svc.state is SttState.IDLE, timeout=5)
+    _time.sleep(0.2)
+    svc.shutdown()
+    assert len(got) <= 1
+
+
+# --- startup -----------------------------------------------------------------------------------------------
+def test_the_speech_engine_starts_only_after_the_window_is_painted():
+    import time as _time
+
+    from fakes import FakeRenderer
+    from ttspython.core.queue_model import SpeechQueue
+    from ttspython.core.tts.controller import SpeechController
+
+    made = []
+    gate = threading.Event()
+    speech = SpeechController(SpeechQueue(), renderer_factory=lambda: made.append(1) or FakeRenderer(0.1), start_gate=gate)
+    _time.sleep(0.3)
+    assert made == []  # nothing competes with building the window
+    gate.set()
+    assert speech.wait_ready(5) and made == [1]
+    speech.shutdown()
+
+
+def test_the_first_paint_releases_the_engine_and_the_device_scan(qtbot, tmp_path):
+    from test_ui import make_controller
+
+    app = make_controller(qtbot, tmp_path)  # make_controller shows the window and waits for it
+    qtbot.waitUntil(app._first_paint.is_set, timeout=2000)

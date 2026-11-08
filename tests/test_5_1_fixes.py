@@ -9,8 +9,13 @@ from PySide6.QtTest import QTest
 from test_ui import make_controller
 from ttspython.core.stt import service
 from ttspython.core.stt.service import SttState
-from ttspython.platform import inject, winapi
+from ttspython.platform import inject
 from ttspython.ui.settings_dialog import SettingsDialog
+
+if inject.IS_WINDOWS:
+    from ttspython.platform import winapi
+else:  # it loads Windows libraries; its tests are skipped elsewhere
+    winapi = None
 
 
 @pytest.fixture

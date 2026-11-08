@@ -9,7 +9,7 @@ import re
 import threading
 import time
 
-from PySide6.QtCore import QObject, QPoint, QRect, Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, QObject, QPoint, QRect, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QGuiApplication, QKeySequence
 from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox
 
@@ -48,6 +48,19 @@ STOP_PATIENCE_MS = 2000  # stopping takes longer than this only when a speech en
 RECORDINGS_FOLDER = "dictation"  # in the data folder
 
 
+class _FirstPaint(QObject):
+    """Calls back once, just after the first paint of a watched window."""
+
+    def __init__(self, callback):
+        super().__init__()
+        self._callback = callback
+
+    def eventFilter(self, obj, event):  # noqa: N802
+        if event.type() == QEvent.Type.Paint:
+            QTimer.singleShot(0, self._callback)
+        return False
+
+
 def _voice_clone():
     """The voice model's module, loaded when first needed: 33 ms of imports kept off the way to the first window."""
     from ..core.tts import clone
@@ -55,6 +68,7 @@ def _voice_clone():
     return clone
 
 
+FIRST_PAINT_FALLBACK_MS = 1000
 UPDATE_DELAY_MS = 4000  # after start, once the window has settled: never in the way of starting
 HOTKEY_RETRY_MS = (3000, 7000)  # retry busy hotkeys 3 s after start, then 10 s
 PREVIEW_MODEL_LABEL = "live preview"  # its row in Settings > Listen > Downloaded models
@@ -119,8 +133,12 @@ class AppController(QObject):
         self._save_timer.timeout.connect(self.save_now)
 
         # Services
+        # The speech engine and the device scan start once the first window is painted: before that, their work
+        # (COM, PortAudio, voice lists) competes with building the window for Python's one running thread.
+        self._first_paint = threading.Event()
         self.speech = services.get("speech") or SpeechController(
-            SpeechQueue(), voice_id=s["tts_voice_id"], rate=s["tts_rate"], volume=s["tts_volume"])
+            SpeechQueue(), voice_id=s["tts_voice_id"], rate=s["tts_rate"], volume=s["tts_volume"],
+            start_gate=self._first_paint)
         self.queue = self.speech.queue
         if s["tts_voice_id"]:
             self.speech.set_voice(s["tts_voice_id"])
@@ -174,7 +192,12 @@ class AppController(QObject):
         self._apply_global_hotkeys()
         self._restore_geometry()
         self._device_preset = services.get("devices")  # tests: a fixed device list, PortAudio untouched
-        self._resolve_devices_async(self._device_preset)
+        if self._device_preset is not None:
+            self._resolve_devices_async(self._device_preset)
+        self._painted_watch = _FirstPaint(self._after_first_paint)
+        for widget in (self.window, self.mini):
+            widget.installEventFilter(self._painted_watch)
+        QTimer.singleShot(FIRST_PAINT_FALLBACK_MS, self.window, self._after_first_paint)  # started hidden, in the tray
         self._load_queue()
         self._refresh_queue()  # not saved: nothing has changed since the last save
         self._on_speech_state(State.IDLE)
@@ -755,6 +778,16 @@ class AppController(QObject):
     # ======================================================================
     # Output device
     # ======================================================================
+    def _after_first_paint(self):
+        if self._first_paint.is_set():
+            return
+        self._first_paint.set()
+        for widget in (self.window, self.mini):
+            with contextlib.suppress(RuntimeError):  # already gone: quitting before anything was painted
+                widget.removeEventFilter(self._painted_watch)
+        if self._device_preset is None:
+            self._resolve_devices_async(None)
+
     def _resolve_devices_async(self, devices=None):
         out_ref = self.settings["tts_output_device"]
         in_ref = self.settings["stt_input_device"]

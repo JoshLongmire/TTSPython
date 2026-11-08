@@ -70,8 +70,15 @@ def _start_error_log():
         diagnostics.start(os.path.join(data_dir(), "logs"))
 
 
+def _load_numpy():
+    import numpy  # noqa: F401
+
+
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
+    # numpy's libraries load on the side while Qt's load here: Windows loads both without holding Python's
+    # lock, so the 0.1 s numpy takes is mostly hidden instead of added to the time before the window.
+    threading.Thread(target=_load_numpy, name="load-numpy", daemon=True).start()
     _console_streams(argv)
     args = parse_args(argv)
     if args.settings:

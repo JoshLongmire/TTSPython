@@ -21,9 +21,19 @@
 - Notices in the window no longer cover the Listen panel and its **Cancel** and **Try again** buttons, and while a model downloads
   with the window in front, its progress no longer pops up again at every step (the status bar and the panel already show it).
 - The voice maker says "None yet" instead of showing an empty list before your first voice.
-- Starting up no longer loads what only a download, the check for new versions, an error or your own voice needs. Against 5.0.0
-  on the test PC, this version had been 122 ms slower to show its window and used 5.3 MB more memory; now it is 43 ms slower
-  (1051 against 1009 ms, the middle of 10 starts each) and uses 1.0 MB more.
+- TTSPython starts faster than 5.0 did and uses less while it waits. Against 5.0.0 on the same PC (the middle of 10 starts
+  each): the window shows in 899 ms instead of 1021 (12% faster), and Play is ready in 1168 ms instead of 1314 (11%). Left
+  alone for 30 seconds it uses 72.0 MB instead of 80.3 MB of its own memory, 0.18% of a processor core instead of 0.21%, and
+  wakes up 22 times a second instead of 44. The maths library loads beside the window's libraries instead of after them, the speech
+  engine and the device list wait until the window is painted, and what only a download, an error, the check for new
+  versions or your own voice needs loads when it is first used.
+- When you pause before stopping a dictation, the text is now typed at once, even while Whisper is still checking the last
+  words: it was already heard. With the instant preview (the default), against 5.0.0, 8 dictations each: after a 3-second pause
+  9 ms instead of 115 (at most 11 instead of 421), after 1.5 seconds 5 ms instead of 441 (at most 6 instead of 604), and after
+  half a second 120 ms instead of 334. Without the preview, after 3 seconds 6 ms instead of 872. Every text came out the same.
+- The download is smaller than 5.0's despite everything added: the Windows zip is 94.85 MB against 95.70 MB built the same way
+  (a database library nothing used is left out). The packaged app shows its window in 492 ms instead of 564 (13% faster).
+- The full comparison with 5.0.0, measured on the same PC the same way, is in `docs/perf/5.1-vs-5.0.md`.
 - Your own voice reading Chinese or Japanese: long text was sent to the model as one piece, because those languages put no space
   after their punctuation, so anything past 30 seconds was cut off. It is now split at their punctuation (or between characters).
   The README now says how clearly your voice reads other languages (from 1 word in 10 misheard in Spanish to 2 in 5 in Japanese,

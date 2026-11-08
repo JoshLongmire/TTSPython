@@ -32,6 +32,8 @@ excludes = [
     "PySide6.QtWebEngineCore", "PySide6.QtMultimedia", "PySide6.Qt3DCore",
     # Pulled in by command-line and doc tools of dependencies, never by the app:
     "pygments", "setuptools", "pydoc_data", "click", "huggingface_hub.cli", "huggingface_hub.commands",
+    # Only filelock's optional read-write lock uses it, which nothing here calls (filelock copes without): 1.6 MB.
+    "sqlite3", "_sqlite3",
 ]
 
 a = Analysis(
