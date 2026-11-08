@@ -703,3 +703,147 @@ def test_the_first_paint_releases_the_engine_and_the_device_scan(qtbot, tmp_path
 
     app = make_controller(qtbot, tmp_path)  # make_controller shows the window and waits for it
     qtbot.waitUntil(app._first_paint.is_set, timeout=2000)
+
+
+# --- found by the user: a first dictation downloaded the model unseen; no live words in the window -------------
+def test_whisper_on_disk_never_goes_online(tmp_path, monkeypatch):
+    from ttspython.core.stt import service as service_mod
+
+    import huggingface_hub.constants as hf_constants
+
+    # Its own empty cache: the library reads HF_HOME once, at import, so an environment variable set now is too late.
+    monkeypatch.setattr(hf_constants, "HF_HUB_CACHE", str(tmp_path / "hf"))
+    monkeypatch.setattr(hf_constants, "HF_HUB_OFFLINE", True)  # any network use would fail loudly
+    assert service_mod.whisper_on_disk("small") is False
+    assert service_mod.whisper_on_disk(str(tmp_path)) is True  # a model folder of one's own
+
+
+class DownloadingCache(ModelCache):
+    """A cache whose model has to be downloaded first; the download waits until released."""
+
+    def __init__(self):
+        import threading as _threading
+
+        self.release = _threading.Event()
+        self.downloads = 0
+
+        def downloader(name, progress, cancel):
+            self.downloads += 1
+            while not self.release.wait(0.02):
+                if cancel.is_set():
+                    from ttspython.core.stt.service import DownloadCancelled
+
+                    raise DownloadCancelled()
+            return "folder"
+
+        super().__init__(loader=lambda path: SaidModel("hello"), downloader=downloader)
+
+
+def test_a_model_can_be_downloaded_before_anything_records(monkeypatch):
+    from ttspython.core.stt import service as service_mod
+
+    monkeypatch.setattr(service_mod, "whisper_on_disk", lambda name: False)
+    cache = DownloadingCache()
+    svc = SttService(recorder=FakeRecorder(), cache=cache, timer_factory=FakeTimer)
+    outcomes = []
+    svc.events.on("model_prepared", outcomes.append)
+    assert not svc.model_ready()
+    assert svc.prepare_model()
+    assert wait_for(lambda: cache.downloads == 1)
+    assert svc.preparing and svc.state is SttState.IDLE
+    assert svc.start("editor") is False  # nothing records during the download
+    cache.release.set()
+    assert wait_for(lambda: outcomes == ["ready"])
+    assert not svc.preparing and svc.model_ready()
+    svc.shutdown()
+
+
+def test_a_model_download_can_be_cancelled(monkeypatch):
+    from ttspython.core.stt import service as service_mod
+
+    monkeypatch.setattr(service_mod, "whisper_on_disk", lambda name: False)
+    cache = DownloadingCache()
+    svc = SttService(recorder=FakeRecorder(), cache=cache, timer_factory=FakeTimer)
+    outcomes = []
+    svc.events.on("model_prepared", outcomes.append)
+    svc.prepare_model()
+    assert wait_for(lambda: cache.downloads == 1)
+    svc.cancel_prepare()
+    assert wait_for(lambda: outcomes == ["cancelled"])
+    assert not svc.preparing
+    svc.shutdown()
+
+
+def test_record_asks_first_and_waits_for_the_download(qtbot, tmp_path, monkeypatch):
+    from test_ui import make_controller
+
+    app = make_controller(qtbot, tmp_path)
+    ready = {"yes": False}
+    monkeypatch.setattr(app.stt, "model_ready", lambda: ready["yes"])
+    started = []
+    monkeypatch.setattr(app.stt, "prepare_model", lambda: started.append(1) or setattr(app.stt, "preparing", True) or True)
+    app.set_mode("stt")
+    app.toggle_dictation("editor")
+    assert app.stt.state is SttState.IDLE  # nothing recorded
+    assert app.window.notice.key == "model_ask" and "Download it now?" in app.window.notice.label.text()
+    [b for b in app.window.notice.buttons() if b.text() == "Download"][0].click()
+    assert started == [1] and app.window.notice.key == "model_download"
+    assert not app.actions["record"].isEnabled() and not app.mini.mic.isEnabled()
+    app.toggle_dictation("editor")  # pressed again during the download
+    assert app.stt.state is SttState.IDLE
+    app._on_model_status("Downloading the small model... 120 of 484 MB (first use only)")
+    assert "120 of 484 MB" in app.window.notice.label.text()
+    app.stt.preparing = False
+    ready["yes"] = True
+    app._on_model_prepared("ready")
+    assert app.actions["record"].isEnabled() and app.mini.mic.isEnabled()
+    assert app.window.notice.key == "model_ready"
+    app.toggle_dictation("editor")
+    assert app.stt.state is SttState.RECORDING
+    app.stt.stop()
+
+
+def test_a_failed_model_download_offers_to_try_again(qtbot, tmp_path):
+    from test_ui import make_controller
+
+    app = make_controller(qtbot, tmp_path)
+    app._on_model_prepared("no network")
+    assert app.window.notice.key == "model_failed" and "no network" in app.window.notice.label.text()
+    assert [b.text() for b in app.window.notice.buttons()] == ["Try again", "Close"]
+
+
+def test_the_update_question_waits_until_the_window_is_on_screen(qtbot, tmp_path):
+    app = controller(qtbot, tmp_path)
+    app.window.hide()  # started in mini mode or the tray
+    assert app.start_update_check() is False
+    assert app.window.notice.key is None
+    app.window.show()
+    qtbot.waitUntil(lambda: app.window.notice.key == "update_ask", timeout=4000)
+
+
+# --- found by dictating into a real Notepad ---------------------------------------------------------------
+def test_a_second_dictation_into_the_same_window_gets_a_space(qtbot, tmp_path, monkeypatch):
+    from test_ui import make_controller
+
+    app = make_controller(qtbot, tmp_path)
+    pasted = []
+    monkeypatch.setattr(app.injector, "inject", lambda text, hwnd: pasted.append((text, hwnd)))
+    app._on_transcript("Thanks for the help!", ("external", 7))
+    app._on_transcript("Please call me back.", ("external", 7))
+    app._on_transcript("Another window.", ("external", 8))
+    app._on_transcript("Line one\n", ("external", 8))
+    app._on_transcript("Line two.", ("external", 8))
+    app._on_transcript(", and more.", ("external", 8))
+    assert [t for t, _h in pasted] == ["Thanks for the help!", " Please call me back.", "Another window.", " Line one\n",
+                                       "Line two.", ", and more."]
+
+
+def test_handing_the_clipboard_to_windows_needs_a_real_clipboard():
+    from ttspython.platform.inject import keep_clipboard_after_exit
+
+    class NoOwner:
+        pass
+
+    calls = []
+    assert keep_clipboard_after_exit(NoOwner(), "windows", flush=lambda: calls.append(1)) is False
+    assert calls == []

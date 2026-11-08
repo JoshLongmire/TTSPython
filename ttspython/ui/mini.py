@@ -486,13 +486,16 @@ class LiveCaption(_NeverActivated, QWidget):
         """Above the pill (below it near the top of the screen), or in the corner without one.
         The bottom edge stays put as lines are added, so the newest words stay in one place."""
         if pill is not None and pill.isVisible():
-            geo = pill.frameGeometry()
+            if pill.isWindow():
+                geo, margin = pill.frameGeometry(), MARGIN  # the pill's window has room for its shadow
+            else:  # a part of the main window (the Listen panel)
+                geo, margin = QRect(pill.mapToGlobal(QPoint(0, 0)), pill.size()), 0
             screen = QGuiApplication.screenAt(geo.center()) or QGuiApplication.primaryScreen()
             area = screen.availableGeometry()
             x = min(max(area.left() + 8, geo.center().x() - self.width() // 2), area.right() - self.width() - 8)
-            y = geo.top() + MARGIN - self.height() - 6
+            y = geo.top() + margin - self.height() - 6
             if y < area.top():
-                y = geo.bottom() - MARGIN + 6
+                y = geo.bottom() - margin + 6
         else:
             area = QGuiApplication.primaryScreen().availableGeometry()
             x, y = area.right() - self.width() - 24, area.bottom() - self.height() - 24

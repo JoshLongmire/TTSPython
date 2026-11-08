@@ -46,7 +46,8 @@ def _private_text(text):
 def keep_clipboard_after_exit(clipboard, platform_name, flush=None):
     """What this app put on the clipboard is only promised, and is made when something pastes it.
     Without this, it would be gone when the app quits. True if it was handed over."""
-    if platform_name != "windows" or not clipboard.ownsClipboard():
+    owns = getattr(clipboard, "ownsClipboard", None)
+    if platform_name != "windows" or owns is None or not owns():
         return False
     try:
         if flush is None:
@@ -158,6 +159,11 @@ class TextInjector(QObject):
             if sent and snapshot is not None and winapi.clipboard_sequence() == ours:
                 self._suppress(previous_text)
                 self.clipboard.setMimeData(snapshot)
+                # Handed to Windows now: if this app were killed or crashed later, what the person had copied
+                # would otherwise be gone with it (Qt only promises clipboard data until it is pasted).
+                keep_clipboard_after_exit(self.clipboard, QGuiApplication.platformName())
+            elif not sent:  # the dictation stays there instead: keep it too
+                keep_clipboard_after_exit(self.clipboard, QGuiApplication.platformName())
             self._busy = False
             if sent:
                 self.finished.emit(True, "")

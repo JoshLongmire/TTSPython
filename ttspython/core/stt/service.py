@@ -327,6 +327,36 @@ def _progress_class(bars, cancel=None):
     return Progress
 
 
+def _local_whisper(name):
+    """(repo, revision, local folder or None): where model name comes from, and its complete folder if downloaded."""
+    from faster_whisper.utils import _MODELS
+    from huggingface_hub import snapshot_download
+
+    repo = WHISPER_REPOS.get(name) or (name if "/" in name else _MODELS.get(name, name))
+    revision = WHISPER_REVISIONS.get(name)
+    # The pinned commit, then what an older version downloaded, which is never fetched again.
+    places = [(repo, revision), (repo, None), *((old, None) for old, current in FORMER_REPOS.items() if current == name)]
+    for where, commit in places:
+        try:
+            local = snapshot_download(where, revision=commit, allow_patterns=WHISPER_FILES, local_files_only=True)
+            if model_complete(local):
+                return repo, revision, local
+            # The folder exists but a download was interrupted: the online call resumes it.
+        except Exception:  # not downloaded yet
+            log.debug("%s is not in the download cache", where)
+    return repo, revision, None
+
+
+def whisper_on_disk(name):
+    """True if model name can load without a download. Never goes online."""
+    if name not in WHISPER_REPOS and os.path.isdir(name):
+        return True
+    try:
+        return _local_whisper(name)[2] is not None
+    except Exception:
+        return False
+
+
 def download_whisper(name, progress=None, cancel=None):
     """Return the local folder of Whisper model name, downloading it first if needed.
 
@@ -339,21 +369,11 @@ def download_whisper(name, progress=None, cancel=None):
     known = name in WHISPER_REPOS
     if not known and os.path.isdir(name):  # "small" always means the model, whatever folder we start in
         return name  # a model folder on disk
-    from faster_whisper.utils import _MODELS
     from huggingface_hub import snapshot_download
 
-    repo = WHISPER_REPOS.get(name) or (name if "/" in name else _MODELS.get(name, name))
-    revision = WHISPER_REVISIONS.get(name)
-    # The pinned commit, then what an older version downloaded, which is never fetched again.
-    places = [(repo, revision), (repo, None), *((old, None) for old, current in FORMER_REPOS.items() if current == name)]
-    for where, commit in places:
-        try:
-            local = snapshot_download(where, revision=commit, allow_patterns=WHISPER_FILES, local_files_only=True)
-            if model_complete(local):
-                return local
-            # The folder exists but a download was interrupted: the online call below resumes it.
-        except Exception:  # not downloaded yet
-            log.debug("%s is not in the download cache", where)
+    repo, revision, local = _local_whisper(name)
+    if local is not None:
+        return local
     bars, done = [], threading.Event()
     t0 = time.perf_counter()
 
@@ -510,6 +530,7 @@ class SttService:
         self._model_tried = threading.Event()
         self._model_tried.set()
         self._detected = None  # the language Whisper heard last, with Auto-detect
+        self.preparing = False  # downloading (and loading) the model on its own, before any recording
         self._typed = None  # the recording whose text has been typed: by the quick finish or the final pass, never both
         self._quick_snapped = threading.Event()  # the quick finish has its copy of the audio
         self._quick_snapped.set()
@@ -575,9 +596,44 @@ class SttService:
             return
         self.start(target)
 
+    def model_ready(self):
+        """Can dictation start without downloading a model first? Never goes online."""
+        if self.cache.loaded_name == self.model or self.cache._downloader is None:  # loaded, or nothing to download
+            return True
+        return whisper_on_disk(self.model)
+
+    def prepare_model(self):
+        """Download (and load) the model now, with nothing recording. model_status events tell the progress, and
+        model_prepared says how it ended: "ready", "cancelled" or why it failed. False if busy."""
+        with self._lock:
+            if self._state is not SttState.IDLE or self.preparing:
+                return False
+            self.preparing = True
+            self.cache.cancel_download.clear()
+        self._pool.submit(self._prepare)
+        return True
+
+    def _prepare(self):
+        outcome = "ready"
+        try:
+            self._get_model()
+        except DownloadCancelled:
+            outcome = "cancelled"
+        except Exception as exc:
+            outcome = str(exc) or type(exc).__name__
+        finally:
+            self.preparing = False
+        if outcome == "ready":
+            self._schedule_unload()
+        self.events.emit("model_prepared", outcome)
+
+    def cancel_prepare(self):
+        if self.preparing:
+            self.cache.cancel_download.set()
+
     def start(self, target=None):
         with self._lock:
-            if self._state is not SttState.IDLE:
+            if self._state is not SttState.IDLE or self.preparing:  # one download at a time, and no recording yet
                 return False
             self._cancel_timer()
             failure = None

@@ -243,12 +243,20 @@ def test_caption_bubble_follows_dictation_into_another_app(qtbot, tmp_path):
         c.quit()
 
 
-def test_editor_dictation_shows_no_bubble(qtbot, tmp_path):
+def test_editor_dictation_shows_the_words_above_the_listen_panel(qtbot, tmp_path):
+    from PySide6.QtCore import QPoint
+
     c = make_controller(qtbot, tmp_path)
     try:
+        c.set_mode("stt")
+        qtbot.waitUntil(c.window.listen_panel.isVisible)
         c.toggle_dictation("editor")
-        assert c.stt.state is SttState.RECORDING and not c.caption.isVisible()
-        assert "cancel_dictation" not in (c.fake_hotkeys.bindings or ({}, True))[0]
+        assert c.stt.state is SttState.RECORDING and c.caption.isVisible()
+        c._on_partial("Buy milk", "and eggs", "")
+        assert "Buy milk and eggs" in shown_text(c.caption)
+        panel_top = c.window.listen_panel.mapToGlobal(QPoint(0, 0)).y()
+        assert c.caption.geometry().bottom() < panel_top  # above the panel, where the words will go
+        assert "cancel_dictation" not in (c.fake_hotkeys.bindings or ({}, True))[0]  # Esc in other apps stays theirs
         c.stt.stop()
     finally:
         c.quit()

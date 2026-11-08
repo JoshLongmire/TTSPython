@@ -18,7 +18,7 @@ from ..core import audio_devices, keys, textio, updates
 from ..core import platform as plat
 from ..core.clipboard_router import Action, ClipboardRouter
 from ..core.queue_model import SpeechQueue, preview
-from ..core.settings import RECENT_MAX, speed_percent, write_json_atomic
+from ..core.settings import RECENT_MAX, WHISPER_MODELS, speed_percent, write_json_atomic
 from ..core.stt import preview as stt_preview
 from ..core.stt import service as stt_models
 from ..core.stt.service import SttService, SttState
@@ -61,6 +61,19 @@ class _FirstPaint(QObject):
         return False
 
 
+class _OnShow(QObject):
+    """Calls back each time the watched window is shown."""
+
+    def __init__(self, callback):
+        super().__init__()
+        self._callback = callback
+
+    def eventFilter(self, obj, event):  # noqa: N802
+        if event.type() == QEvent.Type.Show:
+            self._callback()
+        return False
+
+
 def _voice_clone():
     """The voice model's module, loaded when first needed: 33 ms of imports kept off the way to the first window."""
     from ..core.tts import clone
@@ -69,6 +82,7 @@ def _voice_clone():
 
 
 FIRST_PAINT_FALLBACK_MS = 1000
+PASTE_FOLLOWS_SECONDS = 600  # a dictation into the same window this soon after the last one carries on from it
 UPDATE_DELAY_MS = 4000  # after start, once the window has settled: never in the way of starting
 HOTKEY_RETRY_MS = (3000, 7000)  # retry busy hotkeys 3 s after start, then 10 s
 PREVIEW_MODEL_LABEL = "live preview"  # its row in Settings > Listen > Downloaded models
@@ -194,6 +208,9 @@ class AppController(QObject):
         self._device_preset = services.get("devices")  # tests: a fixed device list, PortAudio untouched
         if self._device_preset is not None:
             self._resolve_devices_async(self._device_preset)
+        self._ask_update_when_shown = False
+        self._shown_watch = _OnShow(self._window_shown)
+        self.window.installEventFilter(self._shown_watch)
         self._painted_watch = _FirstPaint(self._after_first_paint)
         for widget in (self.window, self.mini):
             widget.installEventFilter(self._painted_watch)
@@ -329,6 +346,7 @@ class AppController(QObject):
         st.model_status.connect(self._on_model_status)
         st.preview_status.connect(self._on_preview_status)
         st.error.connect(lambda msg: self._error("Dictation", msg))
+        st.model_prepared.connect(self._on_model_prepared)
         panel = self.window.listen_panel
         st.retry_available.connect(panel.retry.setVisible)
         st.retry_available.connect(panel.discard.setVisible)
@@ -778,6 +796,11 @@ class AppController(QObject):
     # ======================================================================
     # Output device
     # ======================================================================
+    def _window_shown(self):
+        if self._ask_update_when_shown:
+            self._ask_update_when_shown = False
+            QTimer.singleShot(1500, self.window, self.start_update_check)
+
     def _after_first_paint(self):
         if self._first_paint.is_set():
             return
@@ -1072,8 +1095,11 @@ class AppController(QObject):
         self.toggle_dictation(self.capture_target())
 
     def toggle_dictation(self, target):
-        if self.stt.state is SttState.TRANSCRIBING:
+        if self.stt.state is SttState.TRANSCRIBING or getattr(self.stt, "preparing", False):
             self._toast(self.stt.busy_message())
+            return
+        if self.stt.state is SttState.IDLE and not self.stt.model_ready():
+            self._ask_model_download()  # nothing records until the model is here: it would wait minutes, unseen
             return
         if self.stt.state is SttState.IDLE:
             self._dictation_target = target
@@ -1081,20 +1107,95 @@ class AppController(QObject):
                 self._stop_speech()
         self.stt.toggle(target)
 
+    # --- a model the dictation needs first ---------------------------------------------------------------
+    def _model_label(self):
+        name = self.stt.model
+        label = dict(WHISPER_MODELS).get(name, name)
+        return label.split(" (")[0]
+
+    def _model_size(self):
+        mb = stt_models.MODEL_MB.get(self.stt.model)
+        if not mb:
+            return "a download"
+        return f"a {mb / 1000:.1f} GB download" if mb >= 1000 else f"a {mb} MB download"
+
+    def _bring_window(self):
+        """The main window in front, without leaving mini mode: a question there needs an answer."""
+        window = self.window
+        if window.isMinimized():
+            window.showNormal()
+        else:
+            window.show()
+        window.raise_()
+        window.activateWindow()
+
+    def _ask_model_download(self):
+        label = self._model_label()
+        self._bring_window()
+        self.window.notice.show_notice(
+            "model_ask", f"Dictation needs the {label} speech model first: {self._model_size()}, once. "
+                         "Download it now?",
+            [("Download", self.download_model), ("Not now", lambda: None)])
+
+    def download_model(self):
+        if not self.stt.prepare_model():
+            return
+        label = self._model_label()
+        self.window.notice.show_notice("model_download", f"Downloading the {label} model... Dictation is ready when "
+                                                         "it finishes.", [("Cancel", self.stt.cancel_prepare)])
+        self._sync_record_enabled()
+
+    def _on_model_prepared(self, outcome):
+        self._sync_record_enabled()
+        label = self._model_label()
+        if outcome == "ready":
+            text = f"The {label} model is ready. Press record to dictate."
+            self.window.notice.show_notice("model_ready", text, [("OK", lambda: None)])
+            self._status(text)
+            if not self._window_in_front():
+                self._toast(text, 5000)
+        elif outcome == "cancelled":
+            if self.window.notice.key == "model_download":
+                self.window.notice.close_notice()
+            self._status(f"Download of the {label} model cancelled")
+        else:
+            self.window.notice.show_notice("model_failed", f"The {label} model could not be downloaded: {outcome}",
+                                           [("Try again", self.download_model), ("Close", lambda: None)])
+
+    def _sync_record_enabled(self):
+        preparing = getattr(self.stt, "preparing", False)
+        ok = self.stt.state is not SttState.TRANSCRIBING and not preparing
+        self.actions["record"].setEnabled(ok)
+        self.mini.mic.setEnabled(ok)
+        self.window.listen_panel.cancel.setVisible(bool(preparing) or self.window.listen_panel.cancel.isVisible())
+
     def cancel_dictation(self):
         """The caption's X or Esc: throw the recording away, nothing is typed."""
+        if getattr(self.stt, "preparing", False):  # the Listen panel's Cancel, during a download on its own
+            self.stt.cancel_prepare()
+            return
         self.stt.cancel()
         self.caption.hide()
         self.window.listen_panel.cancel.hide()
 
     def _caption_wanted(self):
-        """The bubble is for dictating into other apps; the editor shows its own text."""
+        """The words as they are heard, wherever the text is going: into another app (above the mini bar) or into
+        the editor (above the Listen panel), which only gets its text at the end."""
+        return self._dictation_target is not None
+
+    def _dictating_elsewhere(self):
         return self._dictation_target not in (None, "editor")
+
+    def _caption_anchor(self):
+        panel = self.window.listen_panel
+        if self._dictation_target == "editor" and panel.isVisible() and self.window.isVisible():
+            return panel
+        return self.mini
 
     def _on_partial(self, settled, checked, preview):
         if self.stt.state is SttState.RECORDING and self._caption_wanted():
             self.caption.set_words(settled, checked, preview)
-            self.caption.show_by(self.mini)
+            self.caption.show_by(self._caption_anchor())
 
     def _on_stt_state(self, _state=None):
         state = self.stt.state
@@ -1104,7 +1205,7 @@ class AppController(QObject):
         icons.apply(rec, "stop" if recording else "mic", "#ffffff", 22 if not recording else 20)
         rec.setText("Stop dictation" if recording else "Start dictation")
         rec.setToolTip(rec.text())
-        rec.setEnabled(not transcribing)
+        rec.setEnabled(not transcribing and not getattr(self.stt, "preparing", False))
         panel = self.window.listen_panel
         panel.title.setText(self._stt_title())
         panel.wave.set_source(self.stt.level if recording else None)
@@ -1121,7 +1222,7 @@ class AppController(QObject):
         if recording and self._caption_wanted():
             if not self.caption.isVisible():
                 self.caption.start()
-            self.caption.show_by(self.mini)
+            self.caption.show_by(self._caption_anchor())
         elif transcribing and self.caption.isVisible():
             self.caption.set_status("Typing it in...")
         elif not recording and not transcribing:
@@ -1129,7 +1230,7 @@ class AppController(QObject):
             panel.cancel.hide()
         hotkeys_follow = recording != self._esc_registered
         if hotkeys_follow:
-            self._esc_registered = recording and self._caption_wanted()
+            self._esc_registered = recording and self._dictating_elsewhere()  # in our window Esc is ours anyway
             self._apply_global_hotkeys()
 
     def _apply_keep_recording(self, values):
@@ -1166,7 +1267,21 @@ class AppController(QObject):
         if self.settings["dictation_output"] == "clipboard":
             self.injector.copy_only(text, "Copied to clipboard. Press Ctrl+V to paste.")
         else:
+            text = self._spaced_after_last_paste(text, hwnd)
             self.injector.inject(text, hwnd)
+            self._last_paste = (hwnd, text, time.monotonic())
+
+    def _spaced_after_last_paste(self, text, hwnd):
+        """A second dictation into the same window carries on after the first: "help!" then "Please call" must
+        not become "help!Please". The editor does this itself; another app's text cannot be read, so this goes
+        by what was pasted there last (within PASTE_FOLLOWS_SECONDS)."""
+        last = getattr(self, "_last_paste", None)
+        if not last or not hwnd or last[0] != hwnd or time.monotonic() - last[2] > PASTE_FOLLOWS_SECONDS:
+            return text
+        before = last[1][-1:]
+        if before and not before.isspace() and text[:1] and not text[:1].isspace() and text[:1] not in ".,;:!?":
+            return " " + text
+        return text
 
     def _on_injected(self, pasted, message):
         if message:
@@ -1181,6 +1296,8 @@ class AppController(QObject):
 
     def _on_model_status(self, text):
         self._status(text)
+        if self.window.notice.key == "model_download" and _progress_key(text):
+            self.window.notice.label.setText(f"{text} Dictation is ready when it finishes.")
         if self._clone_dialog is not None:
             self._clone_dialog.model_status(text)
         self.window.listen_panel.cancel.setVisible(bool(_progress_key(text)))
@@ -1190,7 +1307,7 @@ class AppController(QObject):
         in_bubble = self.caption.isVisible() and text.startswith(("Downloading", "Loading"))
         if in_bubble:
             self.caption.set_status(text)  # the bubble already sits where the user is looking
-            self.caption.show_by(self.mini)
+            self.caption.show_by(self._caption_anchor())
         # Dictating from mini mode or a hotkey: the status bar is not visible, so say it where the user is.
         quiet = in_bubble or text == "Model unloaded to free memory" or text.endswith("model ready")
         progress = _progress_key(text)
@@ -1876,6 +1993,9 @@ class AppController(QObject):
     def start_update_check(self, force=False):
         """Ask the user once whether to check; after a yes, check at most once a day."""
         answer = self.settings["update_check"]
+        if answer is None and (not self.window.isVisible() or self.window.isMinimized()):
+            self._ask_update_when_shown = True  # started in mini mode or the tray: ask when the window shows
+            return False
         if answer is None:
             self.window.notice.show_notice(
                 "update_ask", "Should TTSPython check GitHub for new versions now and then? At most once a day, "

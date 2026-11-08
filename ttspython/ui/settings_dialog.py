@@ -619,7 +619,8 @@ class SettingsDialog(QDialog):
         self.update_check.toggled.connect(lambda _on: setattr(self, "_update_check_touched", True))
         self._row(lay, "Check for new versions", self.update_check,
                   "At most once a day, asks GitHub whether a newer TTSPython is out, and tells you with a link. "
-                  "Nothing else is sent, and nothing downloads by itself.")
+                  "Nothing else is sent, and nothing downloads by itself. Off until you say yes: TTSPython asks "
+                  "once, in the main window.")
         path = ElidedLabel(self.ctx.settings.path, Qt.ElideMiddle)
         path.setObjectName("Muted")
         open_btn = QPushButton("Open folder")

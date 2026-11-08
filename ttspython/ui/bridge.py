@@ -35,10 +35,12 @@ class SttBridge(QObject):
     preview_status = Signal(str)
     retry_available = Signal(bool)
     error = Signal(str)
+    model_prepared = Signal(str)
 
     def __init__(self, service, parent=None):
         super().__init__(parent)
         ev = service.events
+        ev.on("model_prepared", self.model_prepared.emit)
         ev.on("state_changed", self.state_changed.emit)
         ev.on("partial", self.partial.emit)
         ev.on("transcript_ready", self.transcript_ready.emit)

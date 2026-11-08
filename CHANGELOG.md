@@ -16,6 +16,17 @@
   try runs on too. Run-on speech heard across those 42 tries went from 19.9 to 4.6 seconds, and the longest from 2.3 to 1.6 seconds;
   a word that needs the second try starts up to about 1.8 seconds later. No normal sentence was cut or retried (0 of 36), and a
   sentence you are already hearing is cut at that point, never said twice. Saving to a file makes any piece that runs on again.
+- The first dictation with a Whisper model that is not downloaded yet asks first ("Dictation needs the Small speech model
+  first: a 484 MB download, once. Download it now?"), and nothing records until the model is in: the line shows how far
+  the download is, with **Cancel**, the record button, the mini bar's mic and the hotkey wait, and it says when it is ready.
+  Before, recording started at once and the download ran unseen until you pressed stop.
+- While you dictate into the editor, the words now show as you say them, in the same bubble as in mini mode, above the
+  Listen panel. The editor still gets the finished text when you stop.
+- The question about new versions waits until the main window is on screen: started in mini mode or the tray, it was asked
+  in a hidden window and never seen. Settings says the switch stays off until you answer.
+- Two dictations in a row into the same app are kept apart by a space ("help! Please", not "help!Please"), as in the editor.
+- After a dictation is pasted, what you had copied is put back and handed to Windows at once, so it is not lost if
+  TTSPython is closed by force later (on the real clipboard: kept in 2 of 2 tries, lost in 2 of 2 without).
 - The first dictation downloads Whisper's model before the live preview's, instead of both at once at half speed each, and the status
   bar no longer switches between the two.
 - Notices in the window no longer cover the Listen panel and its **Cancel** and **Try again** buttons, and while a model downloads

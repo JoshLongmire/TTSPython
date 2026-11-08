@@ -30,7 +30,7 @@ A free, open-source, offline text-to-speech (TTS) and speech-to-text (STT) deskt
 
 ### Listen (speech-to-text)
 - Offline dictation with `faster-whisper` (CPU, int8). Press the record button, speak, press again.
-- **Live captions:** when you dictate into another app, a bubble above the mini bar shows each word about half a second after you say it, so you can spot a mistake early. A fast **instant preview** recognizer shows the words first (slightly dimmer); Whisper then checks them and corrects them in place, and the newest word is highlighted. The bubble grows a line at a time (up to three), with the newest words right above the bar. Its **X** (or `Esc`) cancels the dictation and nothing is typed.
+- **Live captions:** while you dictate, a bubble shows each word about half a second after you say it, so you can spot a mistake early: above the mini bar when you dictate into another app, and above the Listen panel when you dictate into the editor. A fast **instant preview** recognizer shows the words first (slightly dimmer); Whisper then checks them and corrects them in place, and the newest word is highlighted. The bubble grows a line at a time (up to three), with the newest words right above the bar. Its **X** (or `Esc`) cancels the dictation and nothing is typed.
 - **Typed right after you stop:** Whisper checks the text whenever you pause, so if you pause before stopping, the text is typed at once: in tests, 5 to 11 ms after a pause of 1.5 seconds or more, and about 0.1 s after half a second; if you talk right up to the stop, in about 1.3 s with the Small model. Long dictations settle at real pauses as you go, so this stays short however long you talk.
 - **Spoken commands:** say "period" (or "full stop"), "comma", "question mark", "exclamation mark" (or "exclamation point"), "colon", "semicolon", "new line", "new paragraph", and "delete that" (or "scratch that") to remove the sentence before it. After "the", "a", "this" and similar words, with more words following, they stay words ("the period of time"). English, and Auto-detect when it hears English; turn them off in **Settings > Listen > Spoken commands**.
 - Dictation keeps full speed while TTSPython is in the background (Windows 11 would otherwise slow it down 2.6 times while you work in another app).
@@ -106,7 +106,7 @@ Download the latest build from [Releases](https://github.com/JoshLongmire/TTSPyt
   `espeak-ng`, `libportaudio2` and `libxcb-cursor0` from your distribution; the installer tells you if one is missing.
   Built on Ubuntu 22.04, so it runs on distributions from 2022 or newer.
 
-The first dictation downloads the Whisper model you picked (once; it stays in the shared Hugging Face cache until you delete it in **Settings > Listen > Downloaded models**) and, for English, French or Chinese, the live preview model (73 to 134 MB, once per language), a Piper voice downloads when you pick it, and the model for your own voice (762 MB) downloads when you ask for it, so the app needs internet for those. The check for new versions is asked once and only runs after a yes.
+The first dictation asks to download the Whisper model you picked (once; it stays in the shared Hugging Face cache until you delete it in **Settings > Listen > Downloaded models**) and, for English, French or Chinese, the live preview model (73 to 134 MB, once per language), a Piper voice downloads when you pick it, and the model for your own voice (762 MB) downloads when you ask for it, so the app needs internet for those. The check for new versions is asked once and only runs after a yes.
 
 ### From source: Windows
 1. Install Python 3.10 or newer from [python.org](https://www.python.org/downloads/windows/) (tick **Add Python to PATH**).
@@ -259,8 +259,9 @@ Errors are written to the `logs` folder inside `%LOCALAPPDATA%\TTSPython` (Windo
 - On Linux, make sure `portaudio` is installed.
 
 ### The first dictation takes a while
-- The first time you use a Whisper model it is downloaded once (Small is about 480 MB). The download progress shows
-  in the status bar, the Listen panel, and next to the mini bar; your recording is transcribed as soon as it finishes.
+- The first time you dictate with a Whisper model, a line above the text asks to download it (once; Small is about
+  480 MB). Nothing records until it is in: the line shows how far the download is, with **Cancel**, the record button
+  waits, and the line says when it is ready.
   **Cancel** in the Listen panel, or `Esc` from the mini bar, stops it.
   Pick **Tiny** or **Base** in **Settings > Listen** for a smaller download.
 - The live preview model (73 MB, or 128 MB for French and 134 MB for Chinese) also downloads once, in the background; its progress shows in the status bar
