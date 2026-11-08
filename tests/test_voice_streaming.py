@@ -423,7 +423,7 @@ class Blocks:
         self.seconds, self.left = seconds, left
         self.speed = 2.2
 
-    def speak_blocks(self, codes, text, cancel):
+    def speak_blocks(self, codes, text, cancel, pace=None, hold=False):
         for s in self.seconds:
             if cancel.is_set():
                 raise Cancelled()

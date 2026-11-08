@@ -63,6 +63,8 @@ In the editor, `Tab` types a tab; `Ctrl+Tab` and `Ctrl+Shift+Tab` move to the ne
 2. Press `Ctrl+Alt+D` and speak; the caption bubble shows each word as you say it (dimmer words are a first guess that Whisper corrects a moment later).
 3. Press `Ctrl+Alt+D` again. The text appears at your cursor, almost at once if you paused first (`Esc` instead throws it away).
 
+Spoken commands: "period", "comma", "question mark", "exclamation mark", "colon", "semicolon", "new line", "new paragraph", "delete that".
+
 ### Read anything you copy, without switching windows
 1. Turn on mini mode (`Ctrl+Alt+Shift+M`).
 2. Copy text anywhere, then press the play button on the bar (or `Ctrl+Alt+S`).

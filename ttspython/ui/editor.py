@@ -173,7 +173,8 @@ class SpeechTextEdit(TextFileDropMixin, QPlainTextEdit):
         cursor = self.textCursor()
         if cursor.atEnd() and not cursor.hasSelection():
             current = self.toPlainText()
-            cursor.insertText(("" if not current or current.endswith("\n") else "\n") + text + "\n")
+            ending = "" if text.endswith("\n") else "\n"  # a spoken "new line" at the end already gave it one
+            cursor.insertText(("" if not current or current.endswith("\n") else "\n") + text + ending)
         else:
             document = self.document()
             before = document.characterAt(cursor.selectionStart() - 1) if cursor.selectionStart() else " "

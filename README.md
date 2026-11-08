@@ -1,6 +1,6 @@
 # TTSPython
 
-A free, open-source, offline text-to-speech (TTS) and speech-to-text (STT) desktop app for Windows and Linux, with a full editor window and a floating mini bar that works over any app. Speech uses your system voices (SAPI5 on Windows, espeak-ng on Linux) or natural-sounding Piper voices you download once, and dictation runs locally with `faster-whisper`. Nothing you read or say leaves your computer: the app only goes online to download the voices and models you ask for.
+A free, open-source, offline text-to-speech (TTS) and speech-to-text (STT) desktop app for Windows and Linux, with a full editor window and a floating mini bar that works over any app. Speech uses your system voices (SAPI5 on Windows, espeak-ng on Linux) or natural-sounding Piper voices you download once, and dictation runs locally with `faster-whisper`. Nothing you read or say leaves your computer: the app only goes online to download the voices and models you ask for, and, if you say yes when asked, to check for a new version once a day.
 
 ![TTSPython main window](assets/screenshots/main.png)
 
@@ -32,6 +32,7 @@ A free, open-source, offline text-to-speech (TTS) and speech-to-text (STT) deskt
 - Offline dictation with `faster-whisper` (CPU, int8). Press the record button, speak, press again.
 - **Live captions:** when you dictate into another app, a bubble above the mini bar shows each word about half a second after you say it, so you can spot a mistake early. A fast **instant preview** recognizer shows the words first (slightly dimmer); Whisper then checks them and corrects them in place, and the newest word is highlighted. The bubble grows a line at a time (up to three), with the newest words right above the bar. Its **X** (or `Esc`) cancels the dictation and nothing is typed.
 - **Typed right after you stop:** Whisper checks the text whenever you pause, so if you pause before stopping, the text is typed almost at once (usually under 0.1 s in tests, 0.6 s at most); otherwise in about 0.5 to 1.2 s. Long dictations settle at real pauses as you go, so this stays short however long you talk.
+- **Spoken commands:** say "period" (or "full stop"), "comma", "question mark", "exclamation mark" (or "exclamation point"), "colon", "semicolon", "new line", "new paragraph", and "delete that" (or "scratch that") to remove the sentence before it. After "the", "a", "this" and similar words, with more words following, they stay words ("the period of time"). English, and Auto-detect when it hears English; turn them off in **Settings > Listen > Spoken commands**.
 - Dictation keeps full speed while TTSPython is in the background (Windows 11 would otherwise slow it down 2.6 times while you work in another app).
 - Pick the **Whisper model** (from Tiny to Large v3 Turbo) and the **language**: English by default, Auto-detect, or Spanish, French, German, Italian, Portuguese, Dutch, Polish, Russian, Ukrainian, Turkish, Arabic, Hindi, Japanese, Korean or Chinese.
 - The model loads while you are still talking and can unload itself after a set idle time to free memory.
@@ -105,7 +106,7 @@ Download the latest build from [Releases](https://github.com/JoshLongmire/TTSPyt
   `espeak-ng`, `libportaudio2` and `libxcb-cursor0` from your distribution; the installer tells you if one is missing.
   Built on Ubuntu 22.04, so it runs on distributions from 2022 or newer.
 
-The first dictation downloads the Whisper model you picked (once; it stays in the shared Hugging Face cache until you delete it in **Settings > Listen > Downloaded models**) and, for English, French or Chinese, the live preview model (73 to 134 MB, once per language), a Piper voice downloads when you pick it, and the model for your own voice (762 MB) downloads when you ask for it, so the app needs internet for those.
+The first dictation downloads the Whisper model you picked (once; it stays in the shared Hugging Face cache until you delete it in **Settings > Listen > Downloaded models**) and, for English, French or Chinese, the live preview model (73 to 134 MB, once per language), a Piper voice downloads when you pick it, and the model for your own voice (762 MB) downloads when you ask for it, so the app needs internet for those. The check for new versions is asked once and only runs after a yes.
 
 ### From source: Windows
 1. Install Python 3.10 or newer from [python.org](https://www.python.org/downloads/windows/) (tick **Add Python to PATH**).
@@ -146,6 +147,8 @@ The first dictation downloads the Whisper model you picked (once; it stays in th
 2. Press the red record button, speak, press it again. The text goes in at the cursor, like typing. At the very end of the text, it gets a line of its own.
 
 Speech stops when you start dictating, wherever the text is going, so the microphone cannot type what the speakers say.
+
+Say "period", "comma", "question mark", "new line" and the like for the mark or the line break, and "delete that" to remove the sentence before it. "Buy milk period new line call Sam question mark" is typed as two lines: "Buy milk." and "Call Sam?".
 
 ### Dictating into any app
 1. Press `Ctrl+Alt+D` (or the mic in mini mode) while your cursor is in another app.
@@ -193,8 +196,10 @@ The check uses your Whisper model, so if you have never dictated, that also down
 
 - **Privacy:** the recording, the voice and all the speech stay on your computer, in `%LOCALAPPDATA%\TTSPython\cloned-voices` (Windows) or `~/.local/share/ttspython/cloned-voices` (Linux). **Remove** deletes a voice and its recording. **Delete the voice model** frees the disk space and keeps your voices; it is refused while your voice is in use, so pick another voice first. If the model is gone some other way, your voice stays selected and speaking with it says where to download it again.
 - **What it needs:** on the test PC (Intel i5-12600K) it makes speech 2.2 to 2.4 times as fast as it plays, using about 3 processor cores and 1.3 GB of memory, which is released 2 minutes after speech ends. On a slower or busy computer it may pause between sentences; the app measures this when it makes the voice; exporting to a file is not affected, it only takes longer.
+- **Run-on speech:** the model sometimes keeps talking after a short reply ("Okay. Oh, okay."). A piece under five words is made in full before you hear it, and made again once if it runs past what its words need at your voice's pace; such a word can start up to about 1.8 seconds later. A longer sentence that runs on is cut where it should have ended, never said twice.
 - **Waiting:** on the test PC speech starts about half a second after you press Play, because you hear each sentence while it is being made, or about 3 seconds if the model has to load first (it is let go 2 minutes after speech ends). On a computer too slow to keep up, it waits longer before starting a sentence so that it does not stop in the middle of a word.
-- **Limits:** only tested in English, and not yet with a real microphone in a real room. Very short phrases sometimes gain a stray word (6 of 42 tries with one to three words, such as "Yes. All of them."), and digit strings such as phone numbers can come out wrong (555-0142 was heard as 535-042), so check anything important. Longer sentences had about 1.5% of words heard wrong.
+- **Other languages:** your voice reads any text you give it, but outside English it is much less clear. With Whisper listening to 6 sentences in each language, it misheard about 1 word in 50 in English, 1 in 10 in Spanish, 1 in 6 in Portuguese and Chinese, 1 in 5 in French and German, 1 in 3 in Italian and 2 in 5 in Japanese (characters, for Chinese and Japanese). For other languages, a Piper voice from **Get more voices** sounds far better.
+- **Limits:** made from English, and not yet tried with a real microphone in a real room. Very short phrases sometimes gain a stray word (6 of 42 tries with one to three words, such as "Yes. All of them."), and digit strings such as phone numbers can come out wrong (555-0142 was heard as 535-042), so check anything important. Longer sentences had about 1.5% of words heard wrong.
 
 ## Keyboard shortcuts (in the window)
 
@@ -233,9 +238,11 @@ Settings are saved automatically to:
 Unsaved editor text is kept next to the settings file every 30 seconds (`recovery.json`) and put back the next
 time TTSPython starts after a crash, logoff or shutdown. The speech queue is kept there too (`queue.json`).
 
+**New versions:** a few seconds after the first start of 5.1, a line above the text asks whether TTSPython may check GitHub for new versions. After a yes it asks GitHub's public release list at most once a day, sends nothing but that request, and when a newer version is out it says so with a **Download page** button and **Skip this version**. Nothing downloads by itself. Change your answer in **Settings > General > Check for new versions**.
+
 The first time TTSPython 5 starts, it imports your old `tts_settings.json` from the app folder (theme, shortcuts, clipboard, dictation and window size). The old file is left untouched.
 
-The Settings window has these pages: **Appearance** (theme gallery, Performance Mode), **Speech** (voice and Get more voices, speed and volume, which apply as you move them, output device with Refresh, Test and Sound settings, sentence highlight), **Listen** (microphone with a live level meter, Whisper model, downloaded models (Whisper, the live preview and your own voice) with their size and a Delete button, **Unload now**, language, **Instant live preview** on or off, memory options, how dictation reaches other apps), **Clipboard**, **Shortcuts** (in-window and global, with **Enable global hotkeys**), **Mini mode** (with **Show the live waveform** and **Reset position**) and **General** (tray behavior, settings file location). **Save** keeps the changes and closes; **Cancel** undoes them, previews included; closing with unsaved changes asks. The Output, Model and Mic labels in the main window open the matching page.
+The Settings window has these pages: **Appearance** (theme gallery, Performance Mode), **Speech** (voice and Get more voices, speed and volume, which apply as you move them, output device with Refresh, Test and Sound settings, sentence highlight), **Listen** (microphone with a live level meter, Whisper model, downloaded models (Whisper, the live preview and your own voice) with their size and a Delete button, **Unload now**, language, **Instant live preview** on or off, **Keep the recording until it is typed**, **Spoken commands**, memory options, how dictation reaches other apps), **Clipboard**, **Shortcuts** (in-window and global, with **Enable global hotkeys**), **Mini mode** (with **Show the live waveform** and **Reset position**) and **General** (tray behavior, **Check for new versions**, settings file location). **Save** keeps the changes and closes; **Cancel** undoes them, previews included; closing with unsaved changes asks. The Output, Model and Mic labels in the main window open the matching page.
 
 ## Troubleshooting
 

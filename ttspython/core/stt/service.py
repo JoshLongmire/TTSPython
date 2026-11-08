@@ -26,7 +26,6 @@ from __future__ import annotations
 
 import enum
 import gc
-import hashlib
 import logging
 import os
 import queue
@@ -37,6 +36,7 @@ import numpy as np
 from ..events import EventEmitter
 from ..resample import resample
 from ..transcript import normalize_transcript_text
+from . import commands as commands_mod
 from . import preview as preview_mod
 from . import spool as spool_mod
 from . import whisper_digests
@@ -125,6 +125,13 @@ def _joined(pieces):
         if piece:
             out = f"{out} {piece}" if out and preview_mod.spaced(out, piece) else out + piece
     return out
+
+
+def _capital_first(text):
+    for i, ch in enumerate(text):
+        if ch.isalpha():
+            return text[:i] + ch.upper() + text[i + 1:]
+    return text
 
 
 def _without_last_word(text):
@@ -218,6 +225,8 @@ class DamagedDownload(RuntimeError):
 def check_download(folder, digests):
     """Raises DamagedDownload if a file differs from its digest. A commit pins which files are wanted,
     but the download itself is only checked for size: this is what says they arrived as they should."""
+    import hashlib  # only for a download: kept off the way to the first window
+
     for name, wanted in digests.items():
         digest = hashlib.sha256()
         try:
@@ -496,6 +505,11 @@ class SttService:
         self.downloading = False
         self.model = model
         self.language = language
+        self.spoken_commands = True  # "new line", "period", "delete that"... (English)
+        # Clear while a dictation's own Whisper load (often a first download) is under way: the preview's download waits.
+        self._model_tried = threading.Event()
+        self._model_tried.set()
+        self._detected = None  # the language Whisper heard last, with Auto-detect
         self.unload_when_idle = unload_when_idle
         self.auto_unload = auto_unload
         self.auto_unload_minutes = auto_unload_minutes
@@ -590,6 +604,8 @@ class SttService:
                 self._session += 1
                 session = self._recording = self._session
                 self._set_state(SttState.RECORDING)
+                if self.cache.loaded_name != self.model:
+                    self._model_tried.clear()  # set again once _preload's load ends, however it ends
                 self._start_preview(session)
                 if dropped:
                     self.events.emit("retry_available", False)
@@ -637,6 +653,7 @@ class SttService:
             return self.cache.get(self.model, self._notify)
         finally:
             self.downloading = False
+            self._model_tried.set()
 
     def _preload(self):
         try:
@@ -742,6 +759,17 @@ class SttService:
         else:
             self.recorder.stop()
 
+    def _commands_on(self):
+        if not self.spoken_commands:
+            return False
+        # With Auto-detect only when Whisper heard English: "comma" is a word in Italian law, "colon" in French.
+        return self.language == "en" or (self.language == "auto" and self._detected == "en")
+
+    def _final(self, text):
+        """Dictated text as it is typed: tidied, with its spoken commands carried out."""
+        text = normalize_transcript_text(text) if text else ""
+        return commands_mod.apply_commands(text) if self._commands_on() else text
+
     def _keep_on_disk(self):
         spool = getattr(self.recorder, "spool", None)
         return {path for path in (spool.path if spool is not None else None, self._recovered) if path}
@@ -774,7 +802,7 @@ class SttService:
         """Words must not be lost to a model that would not load or a pass that failed. Text that
         was already final is delivered now; only the rest waits."""
         settled, self._settled_text = self._settled_text, ""
-        settled = normalize_transcript_text(settled) if settled else ""
+        settled = self._final(settled)
         if settled:
             self.events.emit("transcript_ready", settled, target)
             spool = getattr(self.recorder, "spool", None)
@@ -875,6 +903,9 @@ class SttService:
 
         def run():
             try:
+                # On a first dictation Whisper's model is downloading too, and this dictation needs only that
+                # one: the preview waits, instead of halving the speed of the download that is waited for.
+                self._model_tried.wait()
                 preview_mod.install(progress, language=language)
                 self.events.emit("preview_status", "Live preview ready")
             except Exception as exc:
@@ -900,7 +931,21 @@ class SttService:
             newer, guessed = _after_overlap(f"{settled} {checked}", newer)
             if guessed and checked:  # Whisper's last word was a guess the preview has heard better
                 checked = _without_last_word(checked)
+            if self._commands_on():  # the bubble shows what will be typed: "milk." for "milk period"
+                settled, checked = self._caption_commands(checked)
             self.events.emit("partial", settled, checked, " ".join(newer))
+
+    def _caption_commands(self, checked):
+        """(settled, checked) for the bubble with spoken commands carried out on both together, the way the
+        final pass does: on the settled text as heard, before its full stop is added."""
+        raw = self._settled_text
+        if not raw:
+            return "", commands_mod.for_caption(checked)
+        both = _capital_first(commands_mod.for_caption(_joined([raw, checked])))
+        settled = _capital_first(commands_mod.for_caption(raw))
+        if settled and both.startswith(settled):
+            return settled, both[len(settled):].strip()
+        return "", both  # "delete that" reached back into the settled words
 
     # --- live captions ----------------------------------------------------------------------
     def _whisper(self, model, audio, words=False):
@@ -910,11 +955,13 @@ class SttService:
         prompt = INITIAL_PROMPT
         if self._settled_text:
             prompt = f"{INITIAL_PROMPT} {self._settled_text[-PROMPT_TAIL:]}"
-        segments, _ = model.transcribe(
+        segments, info = model.transcribe(
             audio, language=language, beam_size=1, best_of=1, temperature=0.0,
             condition_on_previous_text=True, vad_filter=True, initial_prompt=prompt,
             **({"word_timestamps": True} if words else {}),
         )
+        if language is None:
+            self._detected = getattr(info, "language", None)
         units = []
         for seg in segments:
             parts = [(w.start, w.end, w.word) for w in (getattr(seg, "words", None) or [])] if words else []
@@ -1041,11 +1088,14 @@ class SttService:
                 tail = ""
                 if tail_audio.size >= self.recorder.sample_rate * 0.2:
                     tail = _joined(t for _s, _e, t in self._whisper(self._get_model(), tail_audio))
-            text = normalize_transcript_text(_joined([self._settled_text, tail]))
+            heard = _joined([self._settled_text, tail])
+            text = self._final(heard)
             if self._cancelled:
                 return
-            if text:
+            if text.strip():
                 self.events.emit("transcript_ready", text, target)
+            elif heard.strip():
+                self.events.emit("model_status", "Nothing left to type")
             else:
                 self.events.emit("model_status", "No speech detected")
         except DownloadCancelled:

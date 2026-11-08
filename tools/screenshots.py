@@ -103,6 +103,15 @@ def main():
             ctl.theme.apply(themes[0])
             ctl.set_mode("stt")
             grab(ctl.window, "main_listen")
+            # A recording that could not be transcribed, kept for Try again.
+            panel = ctl.window.listen_panel
+            panel.retry.show()
+            panel.discard.show()
+            ctl.window.status_label.setText("Failed to transcribe: the model could not load. Your recording is kept.")
+            grab(ctl.window, "main_try_again")
+            panel.retry.hide()
+            panel.discard.hide()
+            ctl.window.status_label.setText("")
             ctl.set_mode("tts")
             ctl.window.find_bar.open_bar()
             ctl.window.find_bar.find_edit.setText("sentence")
@@ -119,6 +128,11 @@ def main():
             browser = ctl._voice_browser
             browser.resize(620, 520)
             grab(browser, "voice_browser")
+            ctl.open_clone_dialog()
+            maker = ctl._clone_dialog
+            maker.resize(620, 560)
+            grab(maker, "voice_maker")
+            maker.close()
             browser.close()
             dlg.close()
             ctl.mini.restore_position(None)

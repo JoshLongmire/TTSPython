@@ -32,6 +32,7 @@ from PySide6.QtWidgets import (
 
 from ..core import keys
 from ..core import settings as settings_mod
+from ..core.stt import commands as commands_mod
 from ..core.stt import preview as preview_mod
 from ..core.theme import THEME_PRESETS, derive_tokens
 from . import icons
@@ -504,6 +505,10 @@ class SettingsDialog(QDialog):
         self._row(lay, "Keep the recording until it is typed", self.keep_recording,
                   "While you dictate, the sound also goes to a file on this computer, so that a crash or a power cut "
                   "cannot lose it. It is deleted as soon as the text is delivered. Off: in memory only.")
+        self.spoken_commands = ToggleSwitch()
+        self._row(lay, "Spoken commands", self.spoken_commands,
+                  f"Say {commands_mod.EXAMPLES} while you dictate, and get the mark or the action instead of the "
+                  "words. \"Delete that\" removes the sentence before it. English, and Auto-detect when it hears English.")
         self._section(lay, "Memory")
         self.unload_idle = ToggleSwitch()
         self._row(lay, "Unload the model after each dictation", self.unload_idle, "Frees RAM right away.")
@@ -609,6 +614,12 @@ class SettingsDialog(QDialog):
         self.close_to_tray.setEnabled(tray_ok)
         self._row(lay, "Closing the window keeps TTSPython running in the tray", self.close_to_tray,
                   "Quit from the tray icon menu." if tray_ok else "No system tray was found on this desktop.")
+        self.update_check = ToggleSwitch()
+        self._update_check_touched = False
+        self.update_check.toggled.connect(lambda _on: setattr(self, "_update_check_touched", True))
+        self._row(lay, "Check for new versions", self.update_check,
+                  "At most once a day, asks GitHub whether a newer TTSPython is out, and tells you with a link. "
+                  "Nothing else is sent, and nothing downloads by itself.")
         path = ElidedLabel(self.ctx.settings.path, Qt.ElideMiddle)
         path.setObjectName("Muted")
         open_btn = QPushButton("Open folder")
@@ -619,6 +630,14 @@ class SettingsDialog(QDialog):
         self._row(lay, "Settings file", prow)
         lay.addStretch(1)
         return page
+
+    def show_update_answer(self, yes):
+        """Answered in the main window while this was open: show it, and keep it unless the switch is moved here."""
+        if not self._update_check_touched:
+            self.update_check.blockSignals(True)
+            self.update_check.setChecked(bool(yes))
+            self.update_check.blockSignals(False)
+            self.saved_values["update_check"] = yes
 
     def _refresh_devices_button(self):
         btn = tool_button("refresh", "Look for newly connected speakers and microphones")
@@ -695,6 +714,7 @@ class SettingsDialog(QDialog):
         self.language.setCurrentIndex(max(0, self.language.findData(v["stt_language"])))
         self.live_preview.setChecked(v["stt_live_preview"])
         self.keep_recording.setChecked(v["stt_keep_recording"])
+        self.spoken_commands.setChecked(v["stt_spoken_commands"])
         self.unload_idle.setChecked(v["stt_unload_model_when_idle"])
         self.auto_unload.setChecked(v["stt_auto_unload_enabled"])
         self.auto_unload_minutes.setValue(v["stt_auto_unload_minutes"])
@@ -711,6 +731,8 @@ class SettingsDialog(QDialog):
         self.mini_snap.setChecked(v["mini_snap"])
         self.mini_wave.setChecked(v["mini_waveform"])
         self.close_to_tray.setChecked(v["close_to_tray"] and self.ctx.tray_available())
+        self.update_check.setChecked(bool(v["update_check"]))
+        self._update_check_touched = False
         self._check_conflicts()
         self._sync_dependents()
         self._restart_meter()  # the mic list was refilled with signals blocked
@@ -763,6 +785,7 @@ class SettingsDialog(QDialog):
         v["stt_language"] = self.language.currentData()
         v["stt_live_preview"] = self.live_preview.isChecked()
         v["stt_keep_recording"] = self.keep_recording.isChecked()
+        v["stt_spoken_commands"] = self.spoken_commands.isChecked()
         v["stt_unload_model_when_idle"] = self.unload_idle.isChecked()
         v["stt_auto_unload_enabled"] = self.auto_unload.isChecked()
         v["stt_auto_unload_minutes"] = self.auto_unload_minutes.value()
@@ -778,6 +801,8 @@ class SettingsDialog(QDialog):
         v["mini_waveform"] = self.mini_wave.isChecked()
         # Without a tray the switch is disabled; keep the user's saved preference.
         v["close_to_tray"] = self.close_to_tray.isChecked() if self.ctx.tray_available() else self.values["close_to_tray"]
+        # Untouched, the answer stays what it is now: not asked yet, or given in the window while this was open.
+        v["update_check"] = self.update_check.isChecked() if self._update_check_touched else self.ctx.settings["update_check"]
         return v
 
     def _check_conflicts(self):

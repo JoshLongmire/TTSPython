@@ -1,12 +1,13 @@
 """The full application window."""
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QPoint, Qt, Signal
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
     QMainWindow,
+    QPushButton,
     QSplitter,
     QStatusBar,
     QVBoxLayout,
@@ -17,6 +18,48 @@ from .. import __version__
 from .editor import EditorCard
 from .panels import ListenPanel, QueuePanel, TransportBar
 from .widgets import AppMark, ElidedLabel, Segmented, Toast, ToggleSwitch, action_button, announce
+
+
+class NoticeBar(QFrame):
+    """A line above the text with a question or news and a few buttons. Never takes the focus by itself."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("Card")
+        self.setAccessibleName("Notice")
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(12, 6, 6, 6)
+        lay.setSpacing(8)
+        self.label = QLabel()
+        self.label.setWordWrap(True)
+        self.label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        lay.addWidget(self.label, 1)
+        self._buttons = QHBoxLayout()
+        self._buttons.setSpacing(6)
+        lay.addLayout(self._buttons)
+        self.key = None
+        self.hide()
+
+    def show_notice(self, key, text, buttons):
+        """buttons: [(label, callback)]. Each button also closes the bar."""
+        self.key = key
+        self.label.setText(text)
+        while self._buttons.count():
+            self._buttons.takeAt(0).widget().deleteLater()
+        for label, callback in buttons:
+            btn = QPushButton(label)
+            btn.setFocusPolicy(Qt.TabFocus)
+            btn.clicked.connect(lambda _=False, fn=callback: (self.close_notice(), fn()))
+            self._buttons.addWidget(btn)
+        self.show()
+        announce(self.label, text)
+
+    def close_notice(self):
+        self.key = None
+        self.hide()
+
+    def buttons(self):
+        return [self._buttons.itemAt(i).widget() for i in range(self._buttons.count())]
 
 
 class MainWindow(QMainWindow):
@@ -61,6 +104,8 @@ class MainWindow(QMainWindow):
         self.splitter.setStretchFactor(0, 1)
         self.splitter.setStretchFactor(1, 0)
         self.splitter.setSizes([900, 300])
+        self.notice = NoticeBar()
+        bl.addWidget(self.notice)
         bl.addWidget(self.splitter, 1)
         outer.addWidget(body, 1)
 
@@ -167,7 +212,9 @@ class MainWindow(QMainWindow):
         announce(self.status_label, text)
 
     def show_toast(self, text, ms=2600):
-        self.toast.show_message(text, ms)
+        panel = self.listen_panel  # its buttons (Cancel, Try again) must stay in sight
+        above = panel.mapTo(self.centralWidget(), QPoint(0, 0)).y() if panel.isVisible() else None
+        self.toast.show_message(text, ms, above)
 
     def set_mode(self, mode):
         self.mode_switch.set_value(mode)

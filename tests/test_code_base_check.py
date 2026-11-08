@@ -163,7 +163,7 @@ def test_stop_works_while_an_export_holds_the_model(model):  # noqa: F811
     holding, finish = threading.Event(), threading.Event()
 
     class Busy(FakeEngine):
-        def speak(self, codes, text, cancel):
+        def speak(self, codes, text, cancel, pace=None):
             holding.set()
             finish.wait(5)
             return speech(1)
@@ -184,7 +184,7 @@ def test_stop_works_while_an_export_holds_the_model(model):  # noqa: F811
 
 def test_a_failed_render_still_lets_the_model_go(model):  # noqa: F811
     class Broken(FakeEngine):
-        def speak(self, codes, text, cancel):
+        def speak(self, codes, text, cancel, pace=None):
             raise RuntimeError("out of memory")
 
     vid = voice()
@@ -199,7 +199,7 @@ def test_the_idle_timer_cannot_drop_the_model_during_a_render(model):  # noqa: F
     seen = []
 
     class Watches(FakeEngine):
-        def speak(self, codes, text, cancel):
+        def speak(self, codes, text, cancel, pace=None):
             seen.append(clone._idle_timer)
             return speech(1)
 
@@ -213,7 +213,7 @@ def test_the_model_cannot_be_deleted_during_a_render(model):  # noqa: F811
     holding, finish = threading.Event(), threading.Event()
 
     class Busy(FakeEngine):
-        def speak(self, codes, text, cancel):
+        def speak(self, codes, text, cancel, pace=None):
             holding.set()
             finish.wait(5)
             return speech(1)

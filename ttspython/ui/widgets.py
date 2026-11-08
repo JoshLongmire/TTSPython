@@ -362,11 +362,14 @@ class Toast(QLabel):
         self._timer.setSingleShot(True)
         self._timer.timeout.connect(self.hide)
 
-    def show_message(self, text, ms=2600):
+    def show_message(self, text, ms=2600, above=None):
+        """above: a height in the window it must stay over, so as not to cover buttons there."""
         fit_label(self, text)
         parent = self.parentWidget()
         x = (parent.width() - self.width()) // 2
         y = parent.height() - self.height() - 112  # above the transport and status bars
+        if above is not None:
+            y = min(y, above - self.height() - 8)
         self.move(QPoint(max(8, x), max(8, y)))
         self.raise_()
         self.show()

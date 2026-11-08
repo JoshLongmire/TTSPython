@@ -14,6 +14,7 @@ from __future__ import annotations
 import contextlib
 import difflib
 import json
+import math
 import os
 import random
 import re
@@ -362,11 +363,12 @@ def load_codes(voice_id):
 
 
 def split_tokens(text, encode, limit=MAX_TOKENS):
-    """text split at punctuation (or else spaces) into pieces of at most limit tokens each."""
+    """text split at punctuation (or else spaces, or else characters) into pieces of at most limit tokens each.
+    Chinese and Japanese put no space after their punctuation, and none between words."""
     pieces = []
     current = ""
-    for part in re.findall(r"\S.*?(?:[.!?…;:,]+(?=\s)|$)", text.strip(), flags=re.S):
-        joined = f"{current} {part.strip()}".strip()
+    for part in re.findall(r"\S.*?(?:[.!?…;:,]+(?=\s)|[。！？；：，、]+|$)", text.strip(), flags=re.S):
+        joined = _join(current, part.strip())
         if current and len(encode(joined)) > limit:
             pieces.append(current)
             current = part.strip()
@@ -379,12 +381,14 @@ def split_tokens(text, encode, limit=MAX_TOKENS):
         if len(encode(piece)) <= limit:
             out.append(piece)
             continue
+        spaced = len(piece.split()) > 1
+        units = piece.split() if spaced else list(piece)  # no punctuation; no spaces either (Chinese, a long link)
         current = ""
-        for word in piece.split():  # one sentence without any punctuation
-            joined = f"{current} {word}".strip()
+        for unit in units:
+            joined = f"{current} {unit}".strip() if spaced else current + unit
             if current and len(encode(joined)) > limit:
                 out.append(current)
-                current = word
+                current = unit
             else:
                 current = joined
         if current:
@@ -392,8 +396,55 @@ def split_tokens(text, encode, limit=MAX_TOKENS):
     return out
 
 
+def _join(a, b):
+    """Two parts of a text, with a space between them unless that is not how the language is written."""
+    if not a or not b:
+        return a or b
+    ends_cjk = bool(_CJK.match(a[-1])) or a[-1] in "。！？；：，、"
+    return a + b if ends_cjk and _CJK.match(b[0]) else f"{a} {b}"
+
+
 def frame_limit(tokens):
     return min(MAX_FRAMES, 10 + 6 * tokens)
+
+
+# Run-on speech ("babble"): the model sometimes keeps talking after the words, most often after a lone
+# word: "Okay." came out as "Okay. Oh, okay." in 18 of 42 tries of short replies (none in 92 tries of
+# full sentences). A piece longer than its words could take at twice the voice's pace is run-on.
+BABBLE_BASE_SECONDS = 0.8  # breath before and after: a lone word of 0.3 s took up to 0.72 s
+BABBLE_PACE_FACTOR = 2.0   # normal sentences took at most 1.3 times their pace (0.395 s a word against 0.30)
+SHORT_WORDS = 5            # a piece this short is held back until it is whole, and made again if it ran on
+BABBLE_RETRIES = 1  # 2 left 2 of 42 run-ons against 18, but a word then waited up to 3.8 s
+_FADE_SECONDS = 0.015
+
+
+_DIGITS = re.compile(r"\d+")
+_CJK = re.compile("[぀-ヿ㐀-䶿一-鿿가-힯]")
+_DIGIT_WORDS = 0.8  # "555" is said as three words, "2026" as three or four
+_CJK_WORDS = 0.7    # a Chinese or Japanese character takes about 0.2 s, a word 0.3 s
+
+
+def spoken_words(text):
+    """About how many words text is when said: digits are said one by one or in pairs, and Chinese and
+    Japanese have no spaces to count."""
+    digits = sum(len(run) for run in _DIGITS.findall(text))
+    cjk = len(_CJK.findall(text))
+    rest = _CJK.sub(" ", _DIGITS.sub(" ", text))
+    return len(re.findall(r"\w+", rest)) + _DIGIT_WORDS * digits + _CJK_WORDS * cjk
+
+
+def babble_frames(text, pace=None):
+    """The most frames text should take at the voice's pace (words per minute)."""
+    pace = pace if pace and pace > 0 else FALLBACK_WPM
+    seconds = BABBLE_BASE_SECONDS + BABBLE_PACE_FACTOR * spoken_words(text) * 60.0 / pace
+    return math.ceil(seconds / _FRAME_SECONDS)
+
+
+def _fade_out(last, rate):
+    """A short ramp from where cut-off sound stopped down to silence, instead of a click."""
+    n = int(_FADE_SECONDS * rate)
+    end = float(last[-1]) if last is not None and last.size else 0.0
+    return (end * np.linspace(1.0, 0.0, n, dtype=np.float32)).astype(np.float32)
 
 
 # --- the model ----------------------------------------------------------------------------------
@@ -503,8 +554,10 @@ class Engine:
                 state[s[f"{key}_input_name"]] = out[s[f"{key}_output_name"]]
         return out["audio"][0, :, :int(np.asarray(out["audio_lengths"]).reshape(-1)[0])]
 
-    def _piece_blocks(self, codes, token_ids, cancel):
-        """Yields float32 mono audio as soon as there is some. self.speed follows how fast it comes."""
+    def _piece_blocks(self, codes, token_ids, cancel, limit=None):
+        """Yields float32 mono audio as soon as there is some. self.speed follows how fast it comes.
+        self.ran_over says afterwards whether it stopped at the limit instead of by itself."""
+        self.ran_over = False
         ids = self._request(codes, token_ids)
         names = self._tts["onnx"]
         out = self._named(self._prefill, self._prefill.run(
@@ -518,7 +571,7 @@ class Engine:
         started = time.perf_counter()
         # Sound comes at 2.3 to 3 frames per token. The limit stops a runaway, which short text can
         # be: "Yes." once went on for 4 s of babble.
-        for _ in range(frame_limit(len(token_ids))):
+        for _ in range(min(frame_limit(len(token_ids)), limit or MAX_FRAMES)):
             if cancel.is_set():
                 raise Cancelled()
             sampled = self._named(self._frame, self._frame.run(None, {
@@ -544,6 +597,8 @@ class Engine:
                 yield block
                 started = time.perf_counter()
                 pending = []
+        else:
+            self.ran_over = True
         if pending:
             yield self._to_audio(pending, state).mean(axis=0).astype(np.float32)
 
@@ -552,23 +607,50 @@ class Engine:
             now = seconds / elapsed
             self.speed = 0.5 * (self.speed + now) if self.speed else now
 
-    def speak_blocks(self, codes, text, cancel):
-        """Yields (float32 mono audio at self.rate, seconds likely still to come) as they are made."""
-        pieces = [self.tokens(piece) for piece in split_tokens(text, self.tokens)]
+    babble_retries = 0  # pieces made again because they ran on (for measuring)
+
+    def _whole_piece(self, codes, ids, cancel, limit):
+        """A piece made before any of it is heard: again, up to BABBLE_RETRIES times, while it runs on."""
+        for attempt in range(1 + BABBLE_RETRIES):
+            blocks = list(self._piece_blocks(codes, ids, cancel, limit))
+            if not self.ran_over:
+                break
+            if attempt < BABBLE_RETRIES:
+                self.babble_retries += 1
+        if self.ran_over and blocks:  # still running on: cut where it should have ended
+            blocks.append(_fade_out(blocks[-1], self.rate))
+        return blocks
+
+    def speak_blocks(self, codes, text, cancel, pace=None, hold=False):
+        """Yields (float32 mono audio at self.rate, seconds likely still to come) as they are made.
+        pace: the voice's words per minute, to tell run-on speech. hold: nothing is heard until all of it
+        is made (a file), so any piece that runs on is made again, not only a short one."""
+        texts = split_tokens(text, self.tokens)
+        pieces = [self.tokens(piece) for piece in texts]
         expected = sum(len(ids) for ids in pieces) * _SECONDS_PER_TOKEN + (len(pieces) - 1) * _PIECE_GAP_SECONDS
         made = 0.0
-        for i, ids in enumerate(pieces):
+        for i, (piece, ids) in enumerate(zip(texts, pieces)):
             if i:
                 gap = np.zeros(int(_PIECE_GAP_SECONDS * self.rate), dtype=np.float32)
                 made += gap.size / self.rate
                 yield gap, max(0.0, expected - made)
-            for block in self._piece_blocks(codes, ids, cancel):
+            limit = babble_frames(piece, pace)
+            short = spoken_words(piece) < SHORT_WORDS
+            if hold or short:
+                blocks = self._whole_piece(codes, ids, cancel, limit)
+            else:
+                blocks = self._piece_blocks(codes, ids, cancel, limit)  # heard as it is made: cut, never said twice
+            last = None
+            for block in blocks:
+                last = block
                 made += block.size / self.rate
                 yield block, max(0.0, expected - made)
+            if self.ran_over and not (hold or short) and last is not None:
+                yield _fade_out(last, self.rate), max(0.0, expected - made)
 
-    def speak(self, codes, text, cancel):
+    def speak(self, codes, text, cancel, pace=None):
         """float32 mono samples at self.rate."""
-        out = [block for block, _left in self.speak_blocks(codes, text, cancel)]
+        out = [block for block, _left in self.speak_blocks(codes, text, cancel, pace, hold=True)]
         return np.concatenate(out) if out else np.zeros(0, dtype=np.float32)
 
 
@@ -755,7 +837,7 @@ class CloneRenderer:
         try:
             _cancel_idle_timer()  # it must not let the model go in the middle of a long sentence
             engine = self._engine_factory() if self._engine_factory else shared_engine()
-            audio = engine.speak(codes, text, cancel)
+            audio = engine.speak(codes, text, cancel, pace=self.native_wpm(wpm, voice_id))
         finally:
             _release_when_idle()
             _engine_lock.release()
@@ -776,7 +858,7 @@ class CloneRenderer:
         try:
             _cancel_idle_timer()  # it must not let the model go in the middle of a long sentence
             engine = self._engine_factory() if self._engine_factory else shared_engine()
-            for audio, left in engine.speak_blocks(codes, text, cancel):
+            for audio, left in engine.speak_blocks(codes, text, cancel, pace=self.native_wpm(wpm, voice_id)):
                 made += audio.size
                 yield AudioBlock(_to_pcm(audio), engine.rate, left, engine.speed, _DECODE_EVERY * _FRAME_SECONDS)
             if not made:

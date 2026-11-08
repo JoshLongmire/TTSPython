@@ -14,6 +14,8 @@ if os.path.isdir(r"C:\Windows\Fonts"):
 os.environ["TTSPYTHON_INSTANCE"] = f"ttspython-tests-{os.getpid()}"
 # Downloaded voices and the Piper program: a scratch folder, never the user's.
 os.environ["TTSPYTHON_DATA"] = tempfile.mkdtemp(prefix="ttspython-test-data-")
+# Never ask GitHub for new versions: the tests that check this fake the answer.
+os.environ["TTSPYTHON_NO_UPDATE_CHECK"] = "1"
 
 from ttspython.core.platform import config_dir  # noqa: E402
 

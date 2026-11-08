@@ -3,15 +3,18 @@ from __future__ import annotations
 
 import contextlib
 import json
+import logging
 import os
 import re
 import threading
+import time
 
 from PySide6.QtCore import QObject, QPoint, QRect, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QGuiApplication, QKeySequence
 from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox
 
-from ..core import audio_devices, keys, textio
+from .. import __version__
+from ..core import audio_devices, keys, textio, updates
 from ..core import platform as plat
 from ..core.clipboard_router import Action, ClipboardRouter
 from ..core.queue_model import SpeechQueue, preview
@@ -19,7 +22,6 @@ from ..core.settings import RECENT_MAX, speed_percent, write_json_atomic
 from ..core.stt import preview as stt_preview
 from ..core.stt import service as stt_models
 from ..core.stt.service import SttService, SttState
-from ..core.tts import clone as voice_clone
 from ..core.tts.controller import Source, SpeechController, State
 from ..core.tts.export import AudioExporter, mp3_available
 from ..core.tts.render import pick_default_voice
@@ -44,6 +46,16 @@ TEXT_FILTER = "Text files (*.txt);;All files (*)"
 STILL_STOPPING = "Still stopping the previous speech. What you asked for next starts when it has."
 STOP_PATIENCE_MS = 2000  # stopping takes longer than this only when a speech engine is stuck
 RECORDINGS_FOLDER = "dictation"  # in the data folder
+
+
+def _voice_clone():
+    """The voice model's module, loaded when first needed: 33 ms of imports kept off the way to the first window."""
+    from ..core.tts import clone
+
+    return clone
+
+
+UPDATE_DELAY_MS = 4000  # after start, once the window has settled: never in the way of starting
 HOTKEY_RETRY_MS = (3000, 7000)  # retry busy hotkeys 3 s after start, then 10 s
 PREVIEW_MODEL_LABEL = "live preview"  # its row in Settings > Listen > Downloaded models
 
@@ -62,12 +74,15 @@ class AppController(QObject):
     VOICE_MODEL_LABEL = "your own voice"  # its row in Settings > Listen > Downloaded models
 
     devices_resolved = Signal(object)
+    update_found = Signal(object)  # (version, page url) or None
 
     def __init__(self, app: QApplication, settings_store, services=None):
         """services may override "speech", "stt", "exporter", "hotkeys", "tray", "selection" (tests)."""
         super().__init__(app)
         services = services or {}
         self.app = app
+        self._update_get = services.get("update_get") or updates._get
+        self._update_running = False
         self.settings = settings_store
         s = settings_store.data
         self.theme = ThemeManager(app, s["theme_preset"])
@@ -118,6 +133,7 @@ class AppController(QObject):
             auto_unload=s["stt_auto_unload_enabled"], auto_unload_minutes=s["stt_auto_unload_minutes"])
         if not services.get("stt"):
             self.stt.preview_enabled = s["stt_live_preview"]
+        self.stt.spoken_commands = s["stt_spoken_commands"]
         self._apply_keep_recording(s)
         self.exporter = services.get("exporter") or AudioExporter()
         self.speech_bridge = SpeechBridge(self.speech, self)
@@ -346,6 +362,7 @@ class AppController(QObject):
         self.popover.hide_mini.connect(self.show_window)
         self.theme.changed.connect(self._apply_theme_tokens)
         self.devices_resolved.connect(self._on_devices_resolved)
+        self.update_found.connect(self._on_update_found)
         # Windows logoff/shutdown ends the event loop without closing windows: still save,
         # and keep unsaved editor text in a recovery file (no prompt is possible there).
         self.app.commitDataRequest.connect(self._on_commit_data)
@@ -562,7 +579,7 @@ class AppController(QObject):
         self._apply_mode_enabled()
 
     def _your_voice_is_loading(self):
-        return (self.speech.voice_id or "").startswith(voice_clone.PREFIX) and not voice_clone.engine_loaded()
+        return (self.speech.voice_id or "").startswith(_voice_clone().PREFIX) and not _voice_clone().engine_loaded()
 
     def _on_queue_finished(self, stopped):
         self.window.queue_panel.set_playing(None)
@@ -1148,7 +1165,7 @@ class AppController(QObject):
             # The next step of the same download: update a notice on show in place, never pop a new one.
             if self.float_toast.isVisible():
                 self.float_toast.update_text(text, 3500)
-            elif self._window_in_front():
+            elif self._window_in_front() and self.window.toast.isVisible():
                 self.window.show_toast(text, 3500)
         elif not self._window_in_front() and not quiet:
             self._toast(text, 3500)
@@ -1595,7 +1612,12 @@ class AppController(QObject):
         self.stt.set_model(s["stt_whisper_model"])
         self.stt.language = s["stt_language"]
         self.stt.preview_enabled = s["stt_live_preview"]
+        self.stt.spoken_commands = s["stt_spoken_commands"]
         self._apply_keep_recording(s)
+        if s["update_check"] is not None and self.window.notice.key == "update_ask":
+            self.window.notice.close_notice()  # answered in Settings
+        if s["update_check"] and not old["update_check"] and not updates.disabled():
+            self.start_update_check()
         self.stt.configure(unload_when_idle=s["stt_unload_model_when_idle"], auto_unload=s["stt_auto_unload_enabled"],
                            minutes=s["stt_auto_unload_minutes"])
         if old["tts_output_device"] != s["tts_output_device"] or old["stt_input_device"] != s["stt_input_device"]:
@@ -1635,20 +1657,20 @@ class AppController(QObject):
         models = stt_models.downloaded_models()
         if stt_preview.any_installed():
             models.append((PREVIEW_MODEL_LABEL, stt_preview.size_on_disk()))
-        if voice_clone.model_installed():
-            models.append((self.VOICE_MODEL_LABEL, voice_clone.model_size()))
+        if _voice_clone().model_installed():
+            models.append((self.VOICE_MODEL_LABEL, _voice_clone().model_size()))
         return models
 
     def delete_model(self, name):
         """Delete a downloaded Whisper model (or the live preview's). Returns a message if it
         could not be deleted."""
         if name == self.VOICE_MODEL_LABEL:
-            if self.settings["tts_voice_id"].startswith(voice_clone.PREFIX) or self.speech.voice_id.startswith(voice_clone.PREFIX):
+            if self.settings["tts_voice_id"].startswith(_voice_clone().PREFIX) or self.speech.voice_id.startswith(_voice_clone().PREFIX):
                 return "One of your voices is in use. Pick another voice first, then delete the model."
             if self.speech.busy or self.exporter.running:
                 return "Stop speech and any export first, then delete the model."
             try:
-                freed = voice_clone.remove_model()
+                freed = _voice_clone().remove_model()
             except OSError as exc:
                 return str(exc)
             self.speech.refresh_voices()
@@ -1814,6 +1836,64 @@ class AppController(QObject):
             self.window.showMaximized()
         else:
             self.window.show()
+        if not updates.disabled():
+            QTimer.singleShot(UPDATE_DELAY_MS, self.start_update_check)
+
+    # --- new versions ----------------------------------------------------------------------------
+    def start_update_check(self, force=False):
+        """Ask the user once whether to check; after a yes, check at most once a day."""
+        answer = self.settings["update_check"]
+        if answer is None:
+            self.window.notice.show_notice(
+                "update_ask", "Should TTSPython check GitHub for new versions now and then? At most once a day, "
+                "nothing else is sent, and nothing downloads by itself.",
+                [("Yes, check", lambda: self._answer_update_check(True)),
+                 ("No thanks", lambda: self._answer_update_check(False))])
+            return False
+        if not answer or self._update_running or not (force or updates.due(self.settings["update_last_check"])):
+            return False
+        self._update_running = True
+        self.settings.set("update_last_check", time.time())  # also after a failure: no retry on every start
+        self.save_soon()
+        get = self._update_get
+
+        def work():
+            try:
+                found = updates.latest_release(__version__, get=get)
+            except Exception as exc:  # offline, GitHub busy: say nothing, try again tomorrow
+                logging.getLogger(__name__).info("Update check failed: %s", exc)
+                found = None
+            self.update_found.emit(found)
+
+        threading.Thread(target=work, name="update-check", daemon=True).start()
+        return True
+
+    def _answer_update_check(self, yes):
+        self.settings.set("update_check", yes)
+        self.save_soon()
+        if self._settings_dialog is not None:
+            self._settings_dialog.show_update_answer(yes)
+        if yes:
+            self.start_update_check(force=True)
+        else:
+            self._status("TTSPython will not check for new versions. You can turn it on in Settings > General.")
+
+    def _on_update_found(self, found):
+        self._update_running = False
+        if not found or found[0] == self.settings["update_skipped"]:
+            return
+        version, page = found
+        text = f"TTSPython {version} is available (you have {__version__})."
+        self._status(text)
+        if not self._window_in_front():
+            self._toast(f"{text} Open TTSPython to see it.", 6000)
+
+        def skip():
+            self.settings.set("update_skipped", version)
+            self.save_soon()
+
+        self.window.notice.show_notice("update", text, [("Download page", lambda: plat.open_uri(page)),
+                                                        ("Skip this version", skip), ("Later", lambda: None)])
 
     def _on_close_requested(self, event):
         self._remember_layout()

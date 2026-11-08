@@ -94,7 +94,7 @@ def test_one_odd_sentence_does_not_swing_the_pace(voice):  # noqa: F811
 
 def test_the_speed_check_tells_the_pace_of_a_new_voice(voice, monkeypatch):  # noqa: F811
     class Engine(Blocks):
-        def speak(self, codes, text, cancel):
+        def speak(self, codes, text, cancel, pace=None):
             return tone(5.0, self.rate)
 
     monkeypatch.setattr(clone, "_load_engine", lambda cancel: None)

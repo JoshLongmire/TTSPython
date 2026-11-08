@@ -8,12 +8,10 @@ have no model good enough for this, so their captions come from Whisper alone.
 """
 from __future__ import annotations
 
-import hashlib
 import os
 import queue
 import re
 import shutil
-import tarfile
 import threading
 from typing import NamedTuple
 
@@ -159,6 +157,9 @@ def size_on_disk():
 
 def _unpack(archive, folder, files):
     """Take the wanted files out of the archive, each checked against its digest."""
+    import hashlib  # with tarfile, only for a download: kept off the way to the first window
+    import tarfile
+
     wanted = {name: (size, sha) for name, size, sha in files.values()}
     with tarfile.open(archive, "r:bz2") as tar:
         for member in tar:

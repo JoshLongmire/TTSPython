@@ -67,6 +67,7 @@ DEFAULTS = {
     "stt_auto_unload_minutes": 3,
     "stt_live_preview": True,
     "stt_keep_recording": True,
+    "stt_spoken_commands": True,
     "hotkey_conflicts_seen": [],  # "action=keys" already reported as taken by another app (told once)
     "tts_voice_id": "",
     "tts_rate": 200,
@@ -88,6 +89,9 @@ DEFAULTS = {
     "recent_files": [],
     "export_dir": "",
     "export_format": "wav",
+    "update_check": None,     # None: not asked yet. True / False: the user's answer
+    "update_last_check": 0,   # time.time() of the last check
+    "update_skipped": "",     # a version the user does not want to hear about again
 }
 RECENT_MAX = 8
 
@@ -245,7 +249,8 @@ def normalize(raw) -> dict:
     for key in ("performance_mode", "clipboard_monitor", "clipboard_auto_queue",
                 "stt_unload_model_when_idle", "stt_auto_unload_enabled", "sentence_highlight",
                 "queue_loop", "queue_panel_visible", "global_hotkeys_enabled", "close_to_tray",
-                "mini_snap", "mini_waveform", "stt_live_preview", "stt_keep_recording", "tray_notice_shown"):
+                "mini_snap", "mini_waveform", "stt_live_preview", "stt_keep_recording", "stt_spoken_commands",
+                "tray_notice_shown"):
         out[key] = _as_bool(raw.get(key, d[key]), d[key])
 
     out["mode"] = raw.get("mode") if raw.get("mode") in ("tts", "stt") else d["mode"]
@@ -289,6 +294,12 @@ def normalize(raw) -> dict:
     out["recent_files"] = [p for p in recent if isinstance(p, str) and p][:RECENT_MAX] if isinstance(recent, list) else []
     out["export_dir"] = raw.get("export_dir") if isinstance(raw.get("export_dir"), str) else ""
     out["export_format"] = raw.get("export_format") if raw.get("export_format") in ("wav", "mp3") else "wav"
+    check = raw.get("update_check")
+    out["update_check"] = check if isinstance(check, bool) else None
+    last = raw.get("update_last_check")
+    out["update_last_check"] = last if isinstance(last, (int, float)) and not isinstance(last, bool) and last >= 0 else 0
+    skipped = raw.get("update_skipped")
+    out["update_skipped"] = skipped[:40] if isinstance(skipped, str) else ""
     out["settings_version"] = SETTINGS_VERSION
     return out
 

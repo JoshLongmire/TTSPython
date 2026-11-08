@@ -183,6 +183,9 @@ class CloneDialog(QDialog):
         self.list = QListWidget()
         self.list_label.setBuddy(self.list)
         self.list.currentItemChanged.connect(lambda *_: self._update_buttons())
+        self.empty = QLabel("None yet. A voice you make is listed here.")
+        self.empty.setObjectName("Muted")
+        lay.addWidget(self.empty)
         lay.addWidget(self.list, 1)
 
         buttons = QHBoxLayout()
@@ -253,6 +256,7 @@ class CloneDialog(QDialog):
                 self.list.setCurrentItem(item)
         if self.list.currentItem() is None and self.list.count():
             self.list.setCurrentRow(0)
+        self.empty.setVisible(not self.list.count())
         self._update_buttons()
 
     def _update_buttons(self):

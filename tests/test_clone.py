@@ -36,7 +36,7 @@ class FakeEngine:
         self.encoded = (audio, rate)
         return np.arange(160, dtype=np.int32).reshape(10, 16)
 
-    def speak(self, codes, text, cancel):
+    def speak(self, codes, text, cancel, pace=None):
         if cancel.is_set():
             raise Cancelled()
         self.spoken.append((codes.shape, text))
@@ -423,7 +423,8 @@ def test_speech_ends_when_the_model_says_so():
 def test_a_model_that_never_stops_is_stopped():
     engine = fake_engine()
     audio = engine.speak(CODES, "one two", threading.Event())
-    assert audio.size == clone.frame_limit(2) * 3840
+    frames = min(clone.frame_limit(2), clone.babble_frames("one two"))
+    assert audio.size == frames * 3840 + int(clone._FADE_SECONDS * RATE)  # tried again once, then cut and faded
     assert clone.frame_limit(2) * 3840 / RATE < 2  # a word can never turn into seconds of babble
     assert clone.frame_limit(50) > 3 * 50  # and a normal sentence is never cut off
 

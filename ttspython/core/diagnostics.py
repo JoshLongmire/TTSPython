@@ -8,7 +8,6 @@ from __future__ import annotations
 import atexit
 import faulthandler
 import logging
-import logging.handlers
 import os
 import re
 import sys
@@ -59,13 +58,49 @@ def tidy_crash_log(path):
         pass  # only tidying
 
 
+class _FirstErrorFile(logging.Handler):
+    """Opens the log (kept under _MAX_BYTES, with one older file) at the first error. Most runs have none, and
+    logging.handlers costs 24 ms of imports on the way to the first window."""
+
+    def __init__(self, path):
+        super().__init__()
+        self.path = path
+        self._file = None
+        self._failed = False
+
+    def emit(self, record):
+        # Never raises: the code that logged is often handling an error already (a worker thread must not die of it).
+        if self._failed:
+            return
+        try:
+            if self._file is None:
+                import logging.handlers
+
+                self._file = logging.handlers.RotatingFileHandler(self.path, maxBytes=_MAX_BYTES, backupCount=1,
+                                                                  encoding="utf-8")
+                self._file.setFormatter(self.formatter)
+            self._file.emit(record)
+        except Exception:
+            self._failed = True  # a log that cannot be written stays unwritten, without trying again each time
+            self.handleError(record)
+
+    def flush(self):
+        if self._file is not None:
+            self._file.flush()
+
+    def close(self):
+        if self._file is not None:
+            self._file.close()
+            self._file = None
+        super().close()
+
+
 def start(folder, crashes=True):
     """Start writing errors to folder. Returns the log handler. crashes: also where a crash of
     Python itself happened."""
     global _handler, _crash_file, _before
     os.makedirs(folder, mode=0o700, exist_ok=True)
-    _handler = logging.handlers.RotatingFileHandler(os.path.join(folder, LOG_NAME), maxBytes=_MAX_BYTES,
-                                                    backupCount=1, encoding="utf-8")
+    _handler = _FirstErrorFile(os.path.join(folder, LOG_NAME))
     _handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
     _handler.setLevel(logging.WARNING)
     _log.addHandler(_handler)

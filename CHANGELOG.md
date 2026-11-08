@@ -2,7 +2,32 @@
 
 ## Unreleased
 
-## Version 5.1.0 - 2026-11-06
+## Version 5.1.0 - 2026-11-08
+- Spoken commands while dictating: say "period", "comma", "question mark", "exclamation mark", "colon", "semicolon", "new line" or
+  "new paragraph" for the mark or the line break, and "delete that" to remove the sentence before it. "Buy milk period new line call
+  Sam question mark" is typed as "Buy milk." and "Call Sam?" on two lines. After "the", "a", "this" and similar words, with more words
+  following, they stay words ("the period of time"). English, and Auto-detect when it hears English; turn them off in
+  **Settings > Listen > Spoken commands**.
+- TTSPython can tell you when a new version is out. It asks once, in a line above the text; after a yes it asks GitHub's public release
+  list at most once a day, sends nothing else, and shows **Download page** and **Skip this version**. Nothing downloads by itself.
+  **Settings > General > Check for new versions** changes your answer.
+- Your own voice: a short reply such as "Okay." often ran on ("Okay. Oh, okay.", "Wait. Wait.") in 18 of 42 tries. A short piece is
+  now held until it is whole and made again if it runs past what its words need at the voice's pace, and cut with a fade if the second
+  try runs on too. Run-on speech heard across those 42 tries went from 19.9 to 4.6 seconds, and the longest from 2.3 to 1.6 seconds;
+  a word that needs the second try starts up to about 1.8 seconds later. No normal sentence was cut or retried (0 of 36), and a
+  sentence you are already hearing is cut at that point, never said twice. Saving to a file makes any piece that runs on again.
+- The first dictation downloads Whisper's model before the live preview's, instead of both at once at half speed each, and the status
+  bar no longer switches between the two.
+- Notices in the window no longer cover the Listen panel and its **Cancel** and **Try again** buttons, and while a model downloads
+  with the window in front, its progress no longer pops up again at every step (the status bar and the panel already show it).
+- The voice maker says "None yet" instead of showing an empty list before your first voice.
+- Starting up no longer loads what only a download, the check for new versions, an error or your own voice needs. Against 5.0.0
+  on the test PC, this version had been 122 ms slower to show its window and used 5.3 MB more memory; now it is 43 ms slower
+  (1051 against 1009 ms, the middle of 10 starts each) and uses 1.0 MB more.
+- Your own voice reading Chinese or Japanese: long text was sent to the model as one piece, because those languages put no space
+  after their punctuation, so anything past 30 seconds was cut off. It is now split at their punctuation (or between characters).
+  The README now says how clearly your voice reads other languages (from 1 word in 10 misheard in Spanish to 2 in 5 in Japanese,
+  against 1 in 50 in English).
 - A crash or a power cut can no longer lose a dictation. The sound goes to a file on your computer as you speak (at most about the
   last second is missing after a power cut), and is deleted as soon as the text is delivered. At the next start, **Try again** on the
   Listen page puts the text in the editor, and **Discard** deletes the recording. In a real test, a process killed in the middle of
