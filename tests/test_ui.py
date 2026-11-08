@@ -218,13 +218,19 @@ def test_bug05_bug21_selection_highlight_offsets_with_emoji(ctl, qtbot):
     cursor.setPosition(start16)
     cursor.movePosition(QTextCursor.End, QTextCursor.KeepAnchor)
     ctl.editor.setTextCursor(cursor)
-    seen = []
-    ctl.speech_bridge.chunk_started.connect(
-        lambda *a: seen.append([s.cursor.selectedText() for s in ctl.editor.extraSelections()]))
+    seen, why = [], []
+    editor = ctl.editor
+
+    def started(*args):
+        seen.append([s.cursor.selectedText() for s in editor.extraSelections()])
+        why.append({"args": args[1:], "tracking": editor._valid_revision, "revision": editor.document().revision(),
+                    "highlight": editor._highlight_enabled, "state": ctl.speech.state})
+
+    ctl.speech_bridge.chunk_started.connect(started)
     ctl.on_speak_selected()
     qtbot.waitUntil(lambda: len(seen) >= 2, timeout=3000)
-    assert seen[0] == ["Selected sentence one."]
-    assert seen[1] == ["Selected sentence two."]
+    assert seen[0] == ["Selected sentence one."], why  # what the editor held when the sentence started
+    assert seen[1] == ["Selected sentence two."], why
     ctl.on_stop()
 
 
