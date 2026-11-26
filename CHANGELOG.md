@@ -42,8 +42,9 @@
   words: it was already heard. With the instant preview (the default), against 5.0.0, 8 dictations each: after a 3-second pause
   9 ms instead of 115 (at most 11 instead of 421), after 1.5 seconds 5 ms instead of 441 (at most 6 instead of 604), and after
   half a second 120 ms instead of 334. Without the preview, after 3 seconds 6 ms instead of 872. Every text came out the same.
-- The download is smaller than 5.0's despite everything added: the Windows zip is 94.85 MB against 95.70 MB built the same way
-  (a database library nothing used is left out). The packaged app shows its window in 492 ms instead of 564 (13% faster).
+- A database library nothing used is left out: built the same way on the same PC, the Windows zip is 94.85 MB against 5.0's
+  95.70 MB. The zip on the release page is 96.1 MB (5.0's was 95.3 MB), because releases are now built from the exact locked
+  package versions. The packaged app shows its window in 492 ms instead of 564 (13% faster).
 - The full comparison with 5.0.0, measured on the same PC the same way, is in `docs/perf/5.1-vs-5.0.md`.
 - Your own voice reading Chinese or Japanese: long text was sent to the model as one piece, because those languages put no space
   after their punctuation, so anything past 30 seconds was cut off. It is now split at their punctuation (or between characters).
