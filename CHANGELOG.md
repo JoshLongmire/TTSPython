@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-## Version 5.1.0 - 2026-11-08
+## Version 5.1.0 - 2026-11-26
 - Spoken commands while dictating: say "period", "comma", "question mark", "exclamation mark", "colon", "semicolon", "new line" or
   "new paragraph" for the mark or the line break, and "delete that" to remove the sentence before it. "Buy milk period new line call
   Sam question mark" is typed as "Buy milk." and "Call Sam?" on two lines. After "the", "a", "this" and similar words, with more words

@@ -81,7 +81,7 @@ Work even when TTSPython is in the background. All can be changed in **Settings 
 - The window, Settings and mini bar fit small windows and large display scaling without cutting anything off.
 
 ## Requirements
-- **Windows 10/11** or **Linux** (X11 or Wayland). Linux is a preview in 5.0: it is built and smoke-tested automatically, but has had less hands-on testing than Windows, so please report what you find.
+- **Windows 10/11** or **Linux** (X11 or Wayland). Linux is still a preview: it is built and its tests pass automatically on every release, but has had less hands-on testing than Windows, so please report what you find.
 - To run from source: Python 3.10 or newer (developed on 3.13; the full test suite also passes on 3.10).
 - Python packages (installed by the scripts below): `PySide6-Essentials`, `pyttsx3`, `numpy`, `sounddevice`, `lameenc`, `faster-whisper`, `sherpa-onnx` (the instant live preview), `sentencepiece` (your own voice); on Windows also `comtypes` (talks to the SAPI5 voices; pyttsx3 brings `pywin32` for its fallback driver); on Linux also `pynput`.
 - For your own voice (optional): a microphone, 762 MB of disk space and about 1.3 GB of free memory.
@@ -238,7 +238,7 @@ Settings are saved automatically to:
 Unsaved editor text is kept next to the settings file every 30 seconds (`recovery.json`) and put back the next
 time TTSPython starts after a crash, logoff or shutdown. The speech queue is kept there too (`queue.json`).
 
-**New versions:** a few seconds after the first start of 5.1, a line above the text asks whether TTSPython may check GitHub for new versions. After a yes it asks GitHub's public release list at most once a day, sends nothing but that request, and when a newer version is out it says so with a **Download page** button and **Skip this version**. Nothing downloads by itself. Change your answer in **Settings > General > Check for new versions**.
+**New versions:** the first time the main window is open in 5.1, a line above the text asks whether TTSPython may check GitHub for new versions. After a yes it asks GitHub's public release list at most once a day, sends nothing but that request, and when a newer version is out it says so with a **Download page** button and **Skip this version**. Nothing downloads by itself. Change your answer in **Settings > General > Check for new versions**.
 
 The first time TTSPython 5 starts, it imports your old `tts_settings.json` from the app folder (theme, shortcuts, clipboard, dictation and window size). The old file is left untouched.
 
