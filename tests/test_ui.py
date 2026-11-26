@@ -212,7 +212,10 @@ def test_bug18_replace_all_and_clear_are_one_undo_step(ctl):
 
 def test_bug05_bug21_selection_highlight_offsets_with_emoji(ctl, qtbot):
     intro = "\U0001F600 Intro words here. "
-    ctl.editor.setPlainText(intro + "Selected sentence one. Selected sentence two.")
+    # More sentences after the two checked keep speech going while the window catches up: the stand-in
+    # device plays 40 times as fast as real time, and a slow machine finished both before their signals arrived.
+    more = " ".join(f"Then sentence {n} follows them." for n in range(30))
+    ctl.editor.setPlainText(intro + "Selected sentence one. Selected sentence two. " + more)
     cursor = ctl.editor.textCursor()
     start16 = len(intro.encode("utf-16-le")) // 2
     cursor.setPosition(start16)
